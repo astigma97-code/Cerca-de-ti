@@ -535,20 +535,29 @@
 
       <section class="panel-compartir" aria-labelledby="titulo-compartir-tienda">
         <h3 id="titulo-compartir-tienda">Comparte tu tienda</h3>
-        <p>Envía este enlace para que otras personas vean tu perfil y tus productos.</p>
+        <p class="panel-compartir-intro">Tu enlace y código QR son únicos para esta tienda. Compártelos para que tus clientes lleguen directamente a tu perfil.</p>
         <div class="compartir-enlace">
-          <label for="tienda-enlace">Enlace de tu tienda</label>
-          <input type="url" id="tienda-enlace" readonly>
-          <div class="compartir-acciones">
-            <button type="button" class="boton boton--linea" id="btn-copiar-tienda">Copiar enlace</button>
-            <button type="button" class="boton boton--verde" id="btn-compartir-tienda">Compartir enlace</button>
+          <div class="enlace-tienda-encabezado">
+            <label for="tienda-enlace">Enlace directo de tu tienda</label>
+            <span class="enlace-tienda-etiqueta"><span aria-hidden="true">✦</span> Enlace único</span>
           </div>
+          <div class="enlace-tienda-control">
+            <span class="enlace-tienda-icono" aria-hidden="true">↗</span>
+            <input type="url" id="tienda-enlace" readonly aria-describedby="tienda-enlace-ayuda">
+            <button type="button" class="boton boton--verde" id="btn-copiar-tienda">Copiar</button>
+          </div>
+          <small id="tienda-enlace-ayuda">Este enlace abre directamente el perfil y los productos de tu tienda.</small>
+          <button type="button" class="boton boton--linea boton-compartir-enlace" id="btn-compartir-tienda">Compartir enlace</button>
         </div>
         <div class="compartir-qr">
-          <div class="compartir-qr-imagen" id="tienda-qr" role="img" aria-label="Código QR único de tu tienda"></div>
+          <div class="compartir-qr-marco">
+            <span class="compartir-qr-etiqueta">QR ÚNICO</span>
+            <div class="compartir-qr-imagen" id="tienda-qr" role="img" aria-label="Código QR único de tu tienda"></div>
+          </div>
           <div class="compartir-qr-info">
-            <strong>Tu código QR</strong>
-            <p>Al escanearlo, abrirán directamente el perfil de tu tienda.</p>
+            <span class="compartir-qr-sobrelinea">ACCESO DIRECTO</span>
+            <strong>Tu tienda, a un escaneo</strong>
+            <p>Descárgalo para imprimirlo o compártelo con tus clientes. Al escanearlo, llegarán a tu tienda.</p>
             <div class="compartir-acciones">
               <button type="button" class="boton boton--linea" id="btn-compartir-qr">Compartir QR como imagen</button>
               <button type="button" class="boton boton--ambar" id="btn-descargar-qr">Descargar QR en PDF</button>

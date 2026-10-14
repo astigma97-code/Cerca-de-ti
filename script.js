@@ -1643,6 +1643,7 @@ document.addEventListener('click', e => { if (cabecera.classList.contains('abier
 async function cargarPerfil() {
   if (!usuario) { miPerfil = null; return; }
   const r = await db.from('vendedores').select('*').eq('id', usuario.id).maybeSingle();
+  if (r.error) throw r.error;
   miPerfil = r.data;
 }
 
@@ -1815,7 +1816,7 @@ $('#form-crear').addEventListener('submit', async e => {
       btn.disabled = false; return;
     }
     usuario = data.session.user;
-    await db.from('vendedores').upsert({
+    const { error: errorPerfil } = await db.from('vendedores').upsert({
       id: usuario.id,
       negocio,
       responsable,
@@ -1823,7 +1824,10 @@ $('#form-crear').addEventListener('submit', async e => {
       categoria: $('#c-categoria').value,
       descripcion: 'Tienda creada desde Cerca de ti.'
     });
-    await cargarPerfil(); pintarZonaUsuario();
+    if (errorPerfil) throw errorPerfil;
+    await cargarPerfil();
+    if (!miPerfil) throw new Error('La cuenta se creó, pero no se pudo cargar el perfil de la tienda.');
+    pintarZonaUsuario();
     modalAuth.close(); e.target.reset();
     abrirPanel();
   } catch (er) { errAuth(er.message); }
@@ -2005,9 +2009,8 @@ function abrirPanel() {
 }
 
 function urlPublicaTienda(id) {
-  const url = new URL(window.location.href);
+  const url = new URL(window.location.pathname, window.location.origin);
   url.searchParams.set('tienda', id);
-  url.hash = '';
   return url.href;
 }
 
@@ -2032,7 +2035,12 @@ function generarCodigoQR(contenedor, url) {
 }
 
 function prepararCompartirTienda() {
-  if (!miPerfil?.id) return;
+  if (!miPerfil?.id) {
+    $('#tienda-enlace').value = '';
+    $('#tienda-qr').replaceChildren();
+    mostrarMensajeCompartir('Guarda primero los datos de tu tienda para generar su enlace y código QR únicos.', true);
+    return;
+  }
   const url = urlPublicaTienda(miPerfil.id);
   $('#tienda-enlace').value = url;
   $('#compartir-mensaje').hidden = true;
