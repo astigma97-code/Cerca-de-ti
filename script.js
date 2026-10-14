@@ -79,6 +79,16 @@ const urlImagen = valor => {
   }
 };
 const soloDigitos = s => (s || '').replace(/\D/g, '');
+$('#p-codigo-pais').innerHTML = $('#c-codigo-pais').innerHTML;
+function separarCodigoPais(whatsapp) {
+  const numero = soloDigitos(whatsapp);
+  const opciones = [...$('#p-codigo-pais').options]
+    .map(opcion => opcion.value)
+    .sort((a, b) => b.length - a.length);
+  const codigo = opciones.find(prefijo => numero.startsWith(prefijo) && numero.length > prefijo.length);
+  $('#p-codigo-pais').value = codigo || '51';
+  return codigo ? numero.slice(codigo.length) : numero;
+}
 const fmtPrecio = n => (+n).toFixed(2).replace(/\.00$/, '');
 const categoriaFiltro = categoria => {
   const clave = categoriaClase(categoria);
@@ -1312,8 +1322,10 @@ function pintarVendedores() {
         <button type="button" class="boton boton--linea" data-tienda="${v.id}">Ver tienda</button>
         ${esDemo
           ? '<span class="vendedor-demo-etiqueta">Ejemplo</span>'
-          : `<a class="boton-wsp" target="_blank" rel="noopener" aria-label="Escribir a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}">
-              <svg class="icono"><use href="#i-whatsapp"/></svg>
+          : `<button type="button" class="boton boton--linea" data-compartir-tienda="${esc(v.id)}" aria-label="Compartir enlace de ${esc(v.negocio)}">Compartir</button>
+            <button type="button" class="boton boton--linea" data-qr-tienda="${esc(v.id)}" aria-label="Ver código QR de ${esc(v.negocio)}">Ver QR</button>
+            <a class="boton-wsp vendedor-accion-wsp" target="_blank" rel="noopener" aria-label="Escribir por WhatsApp a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}">
+              <svg class="icono" aria-hidden="true"><use href="#i-whatsapp"/></svg><span>WhatsApp</span>
             </a>`}
       </div>
     </article>`;
@@ -1340,6 +1352,22 @@ function abrirWhatsAppProducto(id) {
 }
 
 document.addEventListener('click', e => {
+  const compartirTienda = e.target.closest('[data-compartir-tienda]');
+  if (compartirTienda) {
+    const id = compartirTienda.dataset.compartirTienda;
+    const vendedor = vendedores[id];
+    if (!vendedor) return;
+    abrirTienda(id);
+    compartirEnlaceTienda(vendedor, 'tienda-publica-enlace', 'tienda-publica-mensaje');
+    return;
+  }
+  const qrTienda = e.target.closest('[data-qr-tienda]');
+  if (qrTienda) {
+    abrirTienda(qrTienda.dataset.qrTienda);
+    $('#tienda-qr-panel').hidden = false;
+    $('#btn-ver-qr-publico').setAttribute('aria-expanded', 'true');
+    return;
+  }
   const contactarProducto = e.target.closest('[data-contactar-producto]');
   if (contactarProducto && !contactarProducto.hasAttribute('aria-disabled')) {
     registrarInteraccionProducto(contactarProducto.dataset.contactarProducto, 'whatsapp');
@@ -1492,6 +1520,7 @@ carruselEl.addEventListener('touchend', e => {
 function abrirTienda(id) {
   const v = vendedores[id]; if (!v) return;
   if (modalDetalle.open) modalDetalle.close();
+  modalTienda.dataset.tiendaId = id;
   $('#tienda-avatar').innerHTML = urlImagen(v.avatar_url) ? `<img src="${esc(urlImagen(v.avatar_url))}" alt="">` : esc(v.avatar_emoji || '🏪');
   $('#tienda-nombre').textContent = v.negocio;
   $('#tienda-responsable').textContent = v.responsable ? `Atiende: ${v.responsable}` : '';
@@ -1499,11 +1528,42 @@ function abrirTienda(id) {
   $('#tienda-descripcion').textContent = v.descripcion || 'Este vendedor aún no agregó una descripción.';
   $('#tienda-categoria').textContent = v.categoria || 'Varios';
   $('#tienda-wsp').hidden = esDatoDemo(v);
+  const tieneEnlacePublico = !esDatoDemo(v);
+  $('#btn-compartir-tienda-publica').hidden = !tieneEnlacePublico;
+  $('#btn-ver-qr-publico').hidden = !tieneEnlacePublico;
+  $('#tienda-qr-panel').hidden = true;
+  $('#btn-ver-qr-publico').setAttribute('aria-expanded', 'false');
   const deTienda = productos.filter(p => p.vendedor_id === id).sort((a, b) => Number(destacadoVigente(b)) - Number(destacadoVigente(a)) || new Date(b.creado_en || 0) - new Date(a.creado_en || 0));
   $('#tienda-conteo').textContent = `${deTienda.length} producto(s) en vitrina`;
   $('#tienda-wsp').href = `https://wa.me/${soloDigitos(v.whatsapp)}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}`;
   tiendaProductos.innerHTML = deTienda.map(tarjetaProducto).join('') || '<p class="producto-detalle">Aún no hay productos publicados.</p>';
+  const enlace = urlPublicaTienda(id);
+  $('#tienda-publica-enlace').value = enlace;
+  $('#tienda-publica-mensaje').hidden = true;
+  try {
+    generarCodigoQR($('#tienda-publica-qr'), enlace);
+  } catch (error) {
+    mostrarMensajeCompartir(`${error.message} Puedes compartir el enlace de la tienda.`, true, 'tienda-publica-mensaje');
+  }
   if (!modalTienda.open) modalTienda.showModal();
+}
+
+async function abrirTiendaCompartida(id) {
+  let vendedor = vendedores[id];
+  if (!vendedor && usaSupabase) {
+    const { data, error } = await db.from('vendedores').select('*').eq('id', id).maybeSingle();
+    if (error) throw error;
+    vendedor = data;
+    if (vendedor) vendedores[id] = vendedor;
+  }
+  if (!vendedor) {
+    const aviso = $('#aviso');
+    aviso.hidden = false;
+    aviso.setAttribute('role', 'alert');
+    aviso.textContent = 'No encontramos esta tienda. Es posible que el enlace sea incorrecto o que la tienda ya no esté publicada.';
+    return;
+  }
+  abrirTienda(vendedor.id);
 }
 
 /* ---------- Filtros, búsqueda y orden ---------- */
@@ -1724,8 +1784,15 @@ $('#form-crear').addEventListener('submit', async e => {
     const email = $('#c-email').value.trim();
     const password = $('#c-pass').value;
     const passwordConfirmada = $('#c-pass-confirmar').value;
+    const numeroWhatsApp = soloDigitos($('#c-whats').value);
+    const whatsapp = `${$('#c-codigo-pais').value}${numeroWhatsApp}`;
     if (password !== passwordConfirmada) {
       errAuth('Las contraseñas no coinciden. Escríbelas nuevamente.', false);
+      btn.disabled = false;
+      return;
+    }
+    if (whatsapp.length < 8 || whatsapp.length > 15) {
+      errAuth('Revisa el número de WhatsApp y el código de país. Debe tener entre 8 y 15 dígitos en total.', false);
       btn.disabled = false;
       return;
     }
@@ -1737,7 +1804,7 @@ $('#form-crear').addEventListener('submit', async e => {
         data: {
           negocio,
           responsable,
-          whatsapp: soloDigitos($('#c-whats').value),
+          whatsapp,
           categoria: $('#c-categoria').value
         }
       }
@@ -1752,7 +1819,7 @@ $('#form-crear').addEventListener('submit', async e => {
       id: usuario.id,
       negocio,
       responsable,
-      whatsapp: soloDigitos($('#c-whats').value),
+      whatsapp,
       categoria: $('#c-categoria').value,
       descripcion: 'Tienda creada desde Cerca de ti.'
     });
@@ -1923,7 +1990,7 @@ function abrirPanel() {
     $('#p-negocio').value = miPerfil.negocio || '';
     $('#p-responsable').value = miPerfil.responsable || '';
     $('#p-descripcion').value = miPerfil.descripcion || '';
-    $('#p-whats').value = miPerfil.whatsapp || '';
+    $('#p-whats').value = separarCodigoPais(miPerfil.whatsapp || '');
     $('#p-categoria').value = miPerfil.categoria || 'Alimentos';
     $('#p-direccion').value = miPerfil.direccion || '';
     $('#p-emoji').value = miPerfil.avatar_emoji || '';
@@ -1932,8 +1999,243 @@ function abrirPanel() {
       : esc(miPerfil.avatar_emoji || '🏪');
     $('#p-avatar').value = '';
   }
+  prepararCompartirTienda();
   pintarMisProductos();
   modalPanel.showModal();
+}
+
+function urlPublicaTienda(id) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tienda', id);
+  url.hash = '';
+  return url.href;
+}
+
+function mostrarMensajeCompartir(mensaje, esError = false, idMensaje = 'compartir-mensaje') {
+  const estadoCompartir = $(`#${idMensaje}`);
+  estadoCompartir.hidden = false;
+  estadoCompartir.textContent = mensaje;
+  estadoCompartir.classList.toggle('compartir-mensaje--error', esError);
+}
+
+function generarCodigoQR(contenedor, url) {
+  contenedor.replaceChildren();
+  if (typeof QRCode !== 'function') throw new Error('No se pudo cargar el generador de códigos QR.');
+  new QRCode(contenedor, {
+    text: url,
+    width: 220,
+    height: 220,
+    colorDark: '#183326',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+}
+
+function prepararCompartirTienda() {
+  if (!miPerfil?.id) return;
+  const url = urlPublicaTienda(miPerfil.id);
+  $('#tienda-enlace').value = url;
+  $('#compartir-mensaje').hidden = true;
+  try {
+    generarCodigoQR($('#tienda-qr'), url);
+  } catch (error) {
+    mostrarMensajeCompartir(`${error.message} Puedes compartir el enlace de tu tienda.`, true);
+  }
+}
+
+async function copiarEnlaceTienda(idCampo, idMensaje) {
+  const enlace = $(`#${idCampo}`).value;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(enlace);
+    } else {
+      const campo = $(`#${idCampo}`);
+      campo.focus();
+      campo.select();
+      if (!document.execCommand('copy')) throw new Error('El navegador no permitió copiar el enlace.');
+    }
+    mostrarMensajeCompartir('Enlace copiado. Ya puedes enviarlo a tus clientes.', false, idMensaje);
+    return true;
+  } catch (error) {
+    mostrarMensajeCompartir(`No se pudo copiar el enlace: ${error.message}`, true, idMensaje);
+    return false;
+  }
+}
+
+async function compartirEnlaceTienda(vendedor, idCampo, idMensaje) {
+  const enlace = $(`#${idCampo}`).value;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: vendedor.negocio, text: `Visita ${vendedor.negocio} en Cerca de ti`, url: enlace });
+    } else {
+      const copiado = await copiarEnlaceTienda(idCampo, idMensaje);
+      if (copiado) mostrarMensajeCompartir('Este navegador no ofrece el menú de aplicaciones. Copiamos el enlace para que puedas compartirlo.', false, idMensaje);
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') mostrarMensajeCompartir(`No se pudo compartir el enlace: ${error.message}`, true, idMensaje);
+  }
+}
+
+function obtenerImagenQR(idContenedor) {
+  const canvas = $(`#${idContenedor} canvas`);
+  if (!canvas) throw new Error('El código QR aún no está disponible. Vuelve a abrir esta sección e inténtalo otra vez.');
+  return canvas;
+}
+
+function ajustarTextoCanvas(contexto, texto, anchoMaximo, lineasMaximas) {
+  const palabras = texto.split(/\s+/);
+  const lineas = [];
+  let linea = '';
+  for (const palabra of palabras) {
+    const candidata = linea ? `${linea} ${palabra}` : palabra;
+    if (linea && contexto.measureText(candidata).width > anchoMaximo) {
+      lineas.push(linea);
+      linea = '';
+    }
+    if (contexto.measureText(palabra).width > anchoMaximo) {
+      let fragmento = '';
+      for (const caracter of palabra) {
+        if (fragmento && contexto.measureText(fragmento + caracter).width > anchoMaximo) {
+          lineas.push(fragmento);
+          fragmento = caracter;
+        } else {
+          fragmento += caracter;
+        }
+      }
+      linea = fragmento;
+    } else {
+      linea = linea ? `${linea} ${palabra}` : palabra;
+    }
+  }
+  if (linea) lineas.push(linea);
+  if (lineas.length > lineasMaximas) {
+    lineas.length = lineasMaximas;
+    let ultima = lineas[lineasMaximas - 1];
+    while (ultima && contexto.measureText(`${ultima}…`).width > anchoMaximo) ultima = ultima.slice(0, -1);
+    lineas[lineasMaximas - 1] = `${ultima}…`;
+  }
+  return lineas;
+}
+
+async function crearPDFCodigoQR(canvasQR, vendedor, url) {
+  const hoja = document.createElement('canvas');
+  hoja.width = 1240;
+  hoja.height = 1754;
+  const contexto = hoja.getContext('2d');
+  if (!contexto) throw new Error('No se pudo preparar el PDF del código QR.');
+  contexto.fillStyle = '#ffffff';
+  contexto.fillRect(0, 0, hoja.width, hoja.height);
+  contexto.fillStyle = '#183326';
+  contexto.textAlign = 'center';
+  contexto.textBaseline = 'middle';
+  contexto.font = 'bold 64px Arial, sans-serif';
+  const nombre = ajustarTextoCanvas(contexto, vendedor.negocio || 'Tienda', 1040, 2);
+  nombre.forEach((linea, indice) => contexto.fillText(linea, 620, 205 + indice * 80));
+  contexto.fillStyle = '#526258';
+  contexto.font = '36px Arial, sans-serif';
+  contexto.fillText('Escanea el código para ver nuestra tienda y productos', 620, 390);
+  contexto.imageSmoothingEnabled = false;
+  contexto.drawImage(canvasQR, 220, 470, 800, 800);
+  contexto.fillStyle = '#183326';
+  contexto.font = 'bold 36px Arial, sans-serif';
+  contexto.fillText('Encuéntranos en Cerca de ti', 620, 1380);
+  contexto.fillStyle = '#526258';
+  contexto.font = '24px Arial, sans-serif';
+  const urlLineas = ajustarTextoCanvas(contexto, url, 1040, 3);
+  urlLineas.forEach((linea, indice) => contexto.fillText(linea, 620, 1440 + indice * 38));
+
+  const jpeg = await new Promise((resolve, reject) => hoja.toBlob(
+    imagen => imagen ? resolve(imagen) : reject(new Error('No se pudo generar la imagen para el PDF.')),
+    'image/jpeg',
+    0.94
+  ));
+  const jpegBytes = new Uint8Array(await jpeg.arrayBuffer());
+  const codificar = texto => new TextEncoder().encode(texto);
+  const unirBytes = partes => {
+    const resultado = new Uint8Array(partes.reduce((total, parte) => total + parte.length, 0));
+    let desplazamiento = 0;
+    partes.forEach(parte => {
+      resultado.set(parte, desplazamiento);
+      desplazamiento += parte.length;
+    });
+    return resultado;
+  };
+  const contenido = codificar('q\n595 0 0 842 0 0 cm\n/Im0 Do\nQ\n');
+  const objetoImagen = unirBytes([
+    codificar(`<< /Type /XObject /Subtype /Image /Width ${hoja.width} /Height ${hoja.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`),
+    jpegBytes,
+    codificar('\nendstream')
+  ]);
+  const objetos = [
+    codificar('<< /Type /Catalog /Pages 2 0 R >>'),
+    codificar('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    codificar('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>'),
+    objetoImagen,
+    unirBytes([
+      codificar(`<< /Length ${contenido.length} >>\nstream\n`),
+      contenido,
+      codificar('endstream')
+    ])
+  ];
+  const cabecera = codificar('%PDF-1.4\n');
+  const partes = [cabecera];
+  const offsets = [0];
+  let longitud = cabecera.length;
+  objetos.forEach((objeto, indice) => {
+    offsets.push(longitud);
+    const inicio = codificar(`${indice + 1} 0 obj\n`);
+    const fin = codificar('\nendobj\n');
+    partes.push(inicio, objeto, fin);
+    longitud += inicio.length + objeto.length + fin.length;
+  });
+  const inicioXref = longitud;
+  const tablaXref = [
+    codificar(`xref\n0 ${objetos.length + 1}\n`),
+    codificar('0000000000 65535 f \n'),
+    ...offsets.slice(1).map(offset => codificar(`${String(offset).padStart(10, '0')} 00000 n \n`))
+  ];
+  const trailer = codificar(`trailer\n<< /Size ${objetos.length + 1} /Root 1 0 R >>\nstartxref\n${inicioXref}\n%%EOF`);
+  return new Blob([...partes, ...tablaXref, trailer], { type: 'application/pdf' });
+}
+
+async function descargarPDFCodigoQR(idContenedor, vendedor, url, idMensaje) {
+  try {
+    const canvas = obtenerImagenQR(idContenedor);
+    const pdf = await crearPDFCodigoQR(canvas, vendedor, url);
+    const descarga = document.createElement('a');
+    const archivoUrl = URL.createObjectURL(pdf);
+    descarga.href = archivoUrl;
+    descarga.download = `codigo-qr-${vendedor.id}.pdf`;
+    descarga.click();
+    setTimeout(() => URL.revokeObjectURL(archivoUrl), 1000);
+    mostrarMensajeCompartir('PDF del código QR descargado. Ya puedes imprimirlo desde el archivo.', false, idMensaje);
+  } catch (error) {
+    mostrarMensajeCompartir(`No se pudo descargar el PDF: ${error.message}`, true, idMensaje);
+  }
+}
+
+async function compartirImagenQR(vendedor, idContenedor, idCampo, idMensaje) {
+  try {
+    const canvas = obtenerImagenQR(idContenedor);
+    const datosQR = canvas.toDataURL('image/png').split(',')[1];
+    const bytesQR = Uint8Array.from(atob(datosQR), caracter => caracter.charCodeAt(0));
+    const archivo = new File([bytesQR], `codigo-qr-${vendedor.id}.png`, { type: 'image/png' });
+    if (navigator.share && navigator.canShare?.({ files: [archivo] })) {
+      await navigator.share({ title: `Código QR de ${vendedor.negocio}`, files: [archivo] });
+      mostrarMensajeCompartir('Código QR compartido con las aplicaciones disponibles.', false, idMensaje);
+    } else if (navigator.share) {
+      await navigator.share({
+        title: `Código QR de ${vendedor.negocio}`,
+        text: `Abre la tienda ${vendedor.negocio}:`,
+        url: $(`#${idCampo}`).value
+      });
+      mostrarMensajeCompartir('Se abrió el menú de aplicaciones para compartir el enlace. Este navegador no permite adjuntar la imagen del QR.', false, idMensaje);
+    } else {
+      mostrarMensajeCompartir('Este navegador no ofrece el menú de aplicaciones para compartir. Descarga el PDF del QR y compártelo desde tu dispositivo.', true, idMensaje);
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') mostrarMensajeCompartir(`No se pudo compartir el QR: ${error.message}`, true, idMensaje);
+  }
 }
 
 function abrirPublicador() {
@@ -2448,11 +2750,38 @@ $('#p-avatar').addEventListener('change', () => {
   r.readAsDataURL(f);
 });
 
+$('#btn-copiar-tienda').addEventListener('click', () => copiarEnlaceTienda('tienda-enlace', 'compartir-mensaje'));
+$('#btn-compartir-tienda').addEventListener('click', () => compartirEnlaceTienda(miPerfil, 'tienda-enlace', 'compartir-mensaje'));
+$('#btn-compartir-qr').addEventListener('click', () => compartirImagenQR(miPerfil, 'tienda-qr', 'tienda-enlace', 'compartir-mensaje'));
+$('#btn-descargar-qr').addEventListener('click', () => descargarPDFCodigoQR('tienda-qr', miPerfil, $('#tienda-enlace').value, 'compartir-mensaje'));
+$('#btn-compartir-tienda-publica').addEventListener('click', () => {
+  const vendedor = vendedores[modalTienda.dataset.tiendaId];
+  if (vendedor) compartirEnlaceTienda(vendedor, 'tienda-publica-enlace', 'tienda-publica-mensaje');
+});
+$('#btn-ver-qr-publico').addEventListener('click', e => {
+  const panel = $('#tienda-qr-panel');
+  panel.hidden = !panel.hidden;
+  e.currentTarget.setAttribute('aria-expanded', String(!panel.hidden));
+});
+$('#btn-compartir-qr-publico').addEventListener('click', () => {
+  const vendedor = vendedores[modalTienda.dataset.tiendaId];
+  if (vendedor) compartirImagenQR(vendedor, 'tienda-publica-qr', 'tienda-publica-enlace', 'tienda-publica-mensaje');
+});
+$('#btn-descargar-qr-publico').addEventListener('click', () => {
+  const vendedor = vendedores[modalTienda.dataset.tiendaId];
+  if (vendedor) descargarPDFCodigoQR('tienda-publica-qr', vendedor, $('#tienda-publica-enlace').value, 'tienda-publica-mensaje');
+});
+
 $('#form-perfil').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#btn-guardar-perfil'); btn.disabled = true;
   const msg = $('#perfil-msg');
   try {
+    const numeroWhatsApp = soloDigitos($('#p-whats').value);
+    const whatsapp = `${$('#p-codigo-pais').value}${numeroWhatsApp}`;
+    if (whatsapp.length < 8 || whatsapp.length > 15) {
+      throw new Error('Revisa el número de WhatsApp y el código de país. Debe tener entre 8 y 15 dígitos en total.');
+    }
     let avatar_url = miPerfil?.avatar_url || null;
     const f = $('#p-avatar').files[0];
     if (f) avatar_url = await subirFoto(await procesarImagen(f, 360), `avatares/${usuario.id}/avatar.jpg`);
@@ -2461,7 +2790,7 @@ $('#form-perfil').addEventListener('submit', async e => {
       negocio: $('#p-negocio').value.trim(),
       responsable: $('#p-responsable').value.trim(),
       descripcion: $('#p-descripcion').value.trim() || null,
-      whatsapp: soloDigitos($('#p-whats').value),
+      whatsapp,
       categoria: $('#p-categoria').value,
       direccion: $('#p-direccion').value.trim() || null,
       avatar_emoji: $('#p-emoji').value.trim() || '',
@@ -2734,7 +3063,9 @@ $('#form-editar-producto').addEventListener('submit', async e => {
   } catch (error) {
     mensaje.hidden = false;
     mensaje.className = 'modal-nota msg-error modal-ancho';
-    mensaje.textContent = `No se pudo guardar el producto: ${error.message}`;
+    mensaje.textContent = error.message.includes("Could not find the 'descuento_hasta' column")
+      ? 'La base de datos aún no tiene habilitados los descuentos. En Supabase, ejecuta el archivo migracion_descuentos.sql y vuelve a guardar el producto.'
+      : `No se pudo guardar el producto: ${error.message}`;
   } finally {
     boton.disabled = false;
   }
@@ -2843,6 +3174,18 @@ db.auth.getSession().then(async ({ data }) => {
   await cargarPerfil();
   pintarZonaUsuario();
   await cargarDatos();
+  const tiendaCompartida = new URLSearchParams(window.location.search).get('tienda');
+  if (tiendaCompartida) {
+    try {
+      await abrirTiendaCompartida(tiendaCompartida);
+    } catch (error) {
+      const aviso = $('#aviso');
+      aviso.hidden = false;
+      aviso.setAttribute('role', 'alert');
+      aviso.textContent = 'No se pudo cargar esta tienda. Revisa tu conexión e inténtalo nuevamente.';
+      console.error('Error al abrir una tienda compartida:', error);
+    }
+  }
 });
 
 console.log('%c🏞️ Cerca de ti %c vitrina local viva', 'font-weight:bold;font-size:14px', 'color:#2e4b3c');

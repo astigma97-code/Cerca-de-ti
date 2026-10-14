@@ -401,7 +401,51 @@
       <form id="form-crear" class="modal-campos" hidden>
         <label class="modal-ancho">Nombre del negocio <input type="text" id="c-negocio" required></label>
         <label class="modal-ancho">Tu nombre <input type="text" id="c-responsable" required></label>
-        <label class="modal-ancho">WhatsApp <input type="tel" id="c-whats" placeholder="999 999 999" required></label>
+        <div class="modal-ancho telefono-registro">
+          <label for="c-codigo-pais">País o código de país
+            <select id="c-codigo-pais" required>
+              <option value="49">Alemania (+49)</option>
+              <option value="54">Argentina (+54)</option>
+              <option value="61">Australia (+61)</option>
+              <option value="591">Bolivia (+591)</option>
+              <option value="55">Brasil (+55)</option>
+              <option value="1">Canadá (+1)</option>
+              <option value="56">Chile (+56)</option>
+              <option value="86">China (+86)</option>
+              <option value="57">Colombia (+57)</option>
+              <option value="82">Corea del Sur (+82)</option>
+              <option value="506">Costa Rica (+506)</option>
+              <option value="53">Cuba (+53)</option>
+              <option value="593">Ecuador (+593)</option>
+              <option value="503">El Salvador (+503)</option>
+              <option value="34">España (+34)</option>
+              <option value="1">Estados Unidos (+1)</option>
+              <option value="33">Francia (+33)</option>
+              <option value="502">Guatemala (+502)</option>
+              <option value="504">Honduras (+504)</option>
+              <option value="91">India (+91)</option>
+              <option value="39">Italia (+39)</option>
+              <option value="81">Japón (+81)</option>
+              <option value="52">México (+52)</option>
+              <option value="505">Nicaragua (+505)</option>
+              <option value="31">Países Bajos (+31)</option>
+              <option value="507">Panamá (+507)</option>
+              <option value="595">Paraguay (+595)</option>
+              <option value="51" selected>Perú (+51)</option>
+              <option value="351">Portugal (+351)</option>
+              <option value="1">Puerto Rico (+1)</option>
+              <option value="44">Reino Unido (+44)</option>
+              <option value="1">República Dominicana (+1)</option>
+              <option value="41">Suiza (+41)</option>
+              <option value="598">Uruguay (+598)</option>
+              <option value="58">Venezuela (+58)</option>
+            </select>
+          </label>
+          <label for="c-whats">Número de WhatsApp
+            <input type="tel" id="c-whats" inputmode="tel" autocomplete="tel-national" placeholder="999 999 999" maxlength="20" pattern="[0-9\s()-]{4,20}" aria-describedby="c-whats-ayuda" required>
+          </label>
+          <small id="c-whats-ayuda">Elige tu país y escribe tu número sin el código de país.</small>
+        </div>
         <label class="modal-ancho">¿Qué vendes?
           <select id="c-categoria" required>
             <option value="Alimentos">Alimentos</option><option value="Lácteos">Lácteos</option>
@@ -459,7 +503,15 @@
         </div>
         <label>Nombre del negocio <input type="text" id="p-negocio" required></label>
         <label>Tu nombre <input type="text" id="p-responsable" required></label>
-        <label>WhatsApp <input type="tel" id="p-whats" placeholder="999 999 999" required></label>
+        <div class="modal-ancho telefono-registro">
+          <label for="p-codigo-pais">País o código de país
+            <select id="p-codigo-pais" required></select>
+          </label>
+          <label for="p-whats">Número de WhatsApp
+            <input type="tel" id="p-whats" inputmode="tel" autocomplete="tel-national" placeholder="999 999 999" maxlength="20" pattern="[0-9\s()-]{4,20}" aria-describedby="p-whats-ayuda" required>
+          </label>
+          <small id="p-whats-ayuda">Elige tu país y escribe tu número sin el código de país.</small>
+        </div>
         <label>Categoría principal
           <select id="p-categoria">
             <option value="Alimentos">Alimentos</option><option value="Lácteos">Lácteos</option>
@@ -480,6 +532,31 @@
           <button type="submit" id="btn-guardar-perfil" class="boton boton--verde">Guardar mi perfil</button>
         </div>
       </form>
+
+      <section class="panel-compartir" aria-labelledby="titulo-compartir-tienda">
+        <h3 id="titulo-compartir-tienda">Comparte tu tienda</h3>
+        <p>Envía este enlace para que otras personas vean tu perfil y tus productos.</p>
+        <div class="compartir-enlace">
+          <label for="tienda-enlace">Enlace de tu tienda</label>
+          <input type="url" id="tienda-enlace" readonly>
+          <div class="compartir-acciones">
+            <button type="button" class="boton boton--linea" id="btn-copiar-tienda">Copiar enlace</button>
+            <button type="button" class="boton boton--verde" id="btn-compartir-tienda">Compartir enlace</button>
+          </div>
+        </div>
+        <div class="compartir-qr">
+          <div class="compartir-qr-imagen" id="tienda-qr" role="img" aria-label="Código QR único de tu tienda"></div>
+          <div class="compartir-qr-info">
+            <strong>Tu código QR</strong>
+            <p>Al escanearlo, abrirán directamente el perfil de tu tienda.</p>
+            <div class="compartir-acciones">
+              <button type="button" class="boton boton--linea" id="btn-compartir-qr">Compartir QR como imagen</button>
+              <button type="button" class="boton boton--ambar" id="btn-descargar-qr">Descargar QR en PDF</button>
+            </div>
+          </div>
+        </div>
+        <p class="compartir-mensaje" id="compartir-mensaje" role="status" aria-live="polite" hidden></p>
+      </section>
 
       <div class="panel-publicaciones">
         <h3>2 · Publicar en la vitrina</h3>
@@ -717,11 +794,28 @@
           <p id="tienda-responsable">Atiende: Responsable</p>
           <p class="tienda-direccion" id="tienda-direccion">📍 San Marcos, Cajamarca</p>
         </div>
-        <a href="#" class="boton boton--verde" id="tienda-wsp" target="_blank" rel="noopener">
-          <svg class="icono"><use href="#i-whatsapp"/></svg>
-          WhatsApp
-        </a>
+        <div class="tienda-cabecera-acciones">
+          <button type="button" class="boton boton--linea" id="btn-compartir-tienda-publica" aria-label="Compartir enlace de esta tienda">Compartir</button>
+          <button type="button" class="boton boton--linea" id="btn-ver-qr-publico" aria-expanded="false" aria-controls="tienda-qr-panel">Ver QR</button>
+          <a href="#" class="boton boton--verde tienda-contacto-wsp" id="tienda-wsp" target="_blank" rel="noopener">
+            <svg class="icono" aria-hidden="true"><use href="#i-whatsapp"/></svg>
+            WhatsApp
+          </a>
+        </div>
       </div>
+      <section class="tienda-qr-panel" id="tienda-qr-panel" aria-label="Código QR de la tienda" hidden>
+        <div class="compartir-qr-imagen" id="tienda-publica-qr" role="img" aria-label="Código QR de esta tienda"></div>
+        <div class="tienda-qr-acciones">
+          <strong>Código QR de la tienda</strong>
+          <p>Escanéalo para abrir este perfil.</p>
+          <div class="compartir-acciones">
+            <button type="button" class="boton boton--linea" id="btn-compartir-qr-publico">Compartir QR</button>
+            <button type="button" class="boton boton--ambar" id="btn-descargar-qr-publico">Descargar QR en PDF</button>
+          </div>
+        </div>
+        <input type="hidden" id="tienda-publica-enlace">
+        <p class="compartir-mensaje" id="tienda-publica-mensaje" role="status" aria-live="polite" hidden></p>
+      </section>
       <div class="tienda-cuerpo">
         <p class="tienda-descripcion" id="tienda-descripcion">Descripción de la tienda.</p>
         <div class="tienda-chips">
@@ -741,6 +835,7 @@
     </symbol>
   </svg>
 
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
