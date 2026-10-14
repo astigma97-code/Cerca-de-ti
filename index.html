@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DE NUESTRA TIERRA · Vitrina local de San Marcos, Cajamarca</title>
-  <meta name="description" content="Vitrina digital de negocios locales de San Marcos. Compra y vende directo por WhatsApp.">
+  <title>Cerca de ti · Vitrina local de San Marcos, Cajamarca</title>
+  <meta name="description" content="Marketplace local de San Marcos: descubre productos, emprendedores y ofertas de la comunidad.">
   <link rel="icon" type="image/jpeg" href="DE%20NUESTRA%20TIERRA%20SM.jpeg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,10 +22,10 @@
   <header class="cabecera">
     <div class="contenedor cabecera-fila">
       <a href="#inicio" class="marca">
-        <span class="marca-logo"><img src="DE%20NUESTRA%20TIERRA%20SM.jpeg" alt="Logo de DE NUESTRA TIERRA"></span>
+        <span class="marca-logo"><img src="DE%20NUESTRA%20TIERRA%20SM.jpeg" alt="Logo de Cerca de ti"></span>
         <span class="marca-texto">
-          <strong>DE NUESTRA TIERRA</strong>
-          <small>Vitrina local de San Marcos</small>
+          <strong>Cerca de ti</strong>
+          <small>Mercado local de San Marcos</small>
         </span>
       </a>
       <nav class="navegacion" id="navegacion">
@@ -49,7 +49,7 @@
       <div class="contenedor portada-rejilla">
         <div class="portada-texto">
           <div class="portada-etiqueta">San Marcos, Cajamarca · Pedidos y consultas directo por WhatsApp</div>
-          <h1>El mercado de San Marcos, <em id="slogan-rotativo">abierto todo el día</em></h1>
+          <h1>El mercado de San Marcos, <em id="slogan-rotativo">listo para llevarte lo mejor</em></h1>
           <p class="portada-descripcion">
             Encuentra lo que producen y preparan las tiendas, chacras y talleres de tu
             localidad. Pide directo por WhatsApp, sin intermediarios y al precio de siempre.
@@ -59,30 +59,69 @@
             <input type="search" id="buscador" placeholder="Buscar…" aria-label="Buscar productos">
             <button type="submit" class="boton boton--verde boton-chico">Buscar</button>
           </form>
-          <p class="portada-sugerencias">
-            Buscan mucho:
-            <a href="#productos" data-buscar="queso">queso fresco</a>
-            <a href="#productos" data-buscar="pan">pan de hogar</a>
-            <a href="#productos" data-buscar="miel">miel</a>
-          </p>
+          <div class="portada-sugerencias">
+            <span class="portada-sugerencias-titulo" id="busquedas-populares-titulo">Más buscadas en este dispositivo:</span>
+            <div class="portada-sugerencias-lista" id="busquedas-populares" aria-labelledby="busquedas-populares-titulo"></div>
+          </div>
           <ul class="portada-metricas">
             <li><strong data-contador="productos">0</strong><span>productos en vitrina</span></li>
             <li><strong data-contador="vendedores">0</strong><span>vendedores locales</span></li>
             <li><strong data-contador="categorias">0</strong><span>categorías</span></li>
           </ul>
         </div>
-        <div class="portada-visual">
-          <div class="tarjeta-chat">
-            <div class="tarjeta-chat-cabecera">
-              <span class="avatar">🧀</span>
-              <div><strong>Quesos Rosita</strong><small>en línea</small></div>
-            </div>
-            <div class="burbuja burbuja--mia">Hola 🙌 vi tu queso fresco en DE NUESTRA TIERRA, ¿sigue habiendo?</div>
-            <div class="burbuja burbuja--suya">¡Sí! Te aparto el kilo y te lo dejo por tu casa hoy mismo.</div>
+        <div class="portada-visual" aria-label="Productos locales de San Marcos">
+          <div class="hero-photo">
+            <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80" alt="Productos frescos y locales de San Marcos">
+            <div class="hero-badge">Hecho cerca de ti</div>
           </div>
-          <div class="tarjeta-mini tarjeta-mini--a"><span>🥖</span><div><strong>Pan de hogar</strong><small>S/ 1.50 · La Espiga</small></div></div>
-          <div class="tarjeta-mini tarjeta-mini--b"><span></span><div><strong>Miel pura 350 ml</strong><small>S/ 25 · Mieles del Valle</small></div></div>
-          <span class="sello">100 % de aquí 🌿</span>
+          <div class="hero-mini hero-mini--a">
+            <span>🥖</span>
+            <div>
+              <strong>Pan de hogar</strong>
+              <small>La Espiga</small>
+            </div>
+          </div>
+          <div class="hero-mini hero-mini--b">
+            <span>🍯</span>
+            <div>
+              <strong>Miel pura</strong>
+              <small>Mieles del Valle</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="categoria-section">
+      <div class="contenedor">
+        <div class="seccion-cabecera seccion-cabecera--compacta">
+          <div>
+            <span class="seccion-etiqueta">Descubre</span>
+            <h2>Explora por categorías</h2>
+          </div>
+          <a href="#productos" class="enlace-secundario" data-ver-todas-categorias>Ver todas las categorías →</a>
+        </div>
+        <div class="categoria-grid">
+          <button type="button" class="categoria-tarjeta" data-filtro="frutas-y-verduras" aria-pressed="false" style="--cat-photo:url('https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80');">
+            <span class="categoria-imagen" aria-hidden="true"></span>
+            <span class="categoria-titulo">Frutas y verduras</span>
+          </button>
+          <button type="button" class="categoria-tarjeta" data-filtro="lacteos" aria-pressed="false" style="--cat-photo:url('https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=900&q=80');">
+            <span class="categoria-imagen" aria-hidden="true"></span>
+            <span class="categoria-titulo">Lácteos</span>
+          </button>
+          <button type="button" class="categoria-tarjeta" data-filtro="carnes" aria-pressed="false" style="--cat-photo:url('https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=900&q=80');">
+            <span class="categoria-imagen" aria-hidden="true"></span>
+            <span class="categoria-titulo">Carnes</span>
+          </button>
+          <button type="button" class="categoria-tarjeta" data-filtro="panaderia" aria-pressed="false" style="--cat-photo:url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80');">
+            <span class="categoria-imagen" aria-hidden="true"></span>
+            <span class="categoria-titulo">Panadería</span>
+          </button>
+          <button type="button" class="categoria-tarjeta" data-filtro="abarrotes" aria-pressed="false" style="--cat-photo:url('https://images.unsplash.com/photo-1518843875459-f738682238a6?auto=format&fit=crop&w=900&q=80');">
+            <span class="categoria-imagen" aria-hidden="true"></span>
+            <span class="categoria-titulo">Abarrotes</span>
+          </button>
         </div>
       </div>
     </section>
@@ -92,7 +131,7 @@
       <div class="contenedor">
         <div class="seccion-cabecera">
           <div>
-            <h2>La vitrina de hoy</h2>
+            <h2>Productos destacados</h2>
             <p id="conteo-productos">Cargando productos…</p>
           </div>
           <div class="ordenar">
@@ -105,6 +144,10 @@
             </select>
           </div>
         </div>
+        <aside class="aviso-catalogo-demo" id="aviso-catalogo-demo" role="note" hidden>
+          <span aria-hidden="true">ℹ️</span>
+          <p><strong>Catálogo de demostración:</strong> productos, imágenes, precios y vendedores son ejemplos para probar la vitrina. No son ofertas reales y los botones de contacto están desactivados.</p>
+        </aside>
         <div class="filtros" id="filtros">
           <button class="chip chip--activo" data-filtro="todos" aria-pressed="true">Todos</button>
           <button class="chip" data-filtro="alimentos">Alimentos</button>
@@ -129,12 +172,49 @@
           <button class="chip" data-filtro="tecnologia">Tecnología</button>
           <button class="chip" data-filtro="otro">Otro</button>
         </div>
+        <aside class="aviso-catalogo-demo promocion-aviso" id="aviso-promociones" role="status" hidden></aside>
         <div class="productos-rejilla" id="lista-productos"></div>
         <div class="sin-resultados" id="sin-resultados" hidden>
-          <p class="sin-resultados-titulo">No encontramos productos.</p>
-          <p>Prueba con otra categoría, búscalos por su nombre o vuelve a cargar la vitrina.</p>
+          <p class="sin-resultados-titulo">Tu próxima compra puede empezar aquí.</p>
+          <p>Estamos preparando la vitrina para que descubras productos de nuestra comunidad.</p>
           <button class="boton boton--linea" data-limpiar-filtros>Ver todo de nuevo</button>
           <button class="boton boton--verde" data-reintentar hidden>Reintentar carga</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vendedores -->
+    <section class="vendedores" id="vendedores">
+      <div class="contenedor">
+        <div class="seccion-cabecera">
+          <div><h2>Vendedores locales</h2><p>Conoce quién está detrás de cada producto.</p></div>
+        </div>
+        <div class="vendedores-rejilla" id="lista-vendedores"></div>
+      </div>
+    </section>
+
+    <section class="mercado-editorial">
+      <div class="contenedor">
+        <div class="mercado-editorial__cabecera">
+          <span class="seccion-etiqueta">Lo que más cerca está</span>
+          <h2>Un marketplace local pensado para descubrir, comparar y pedir sin complicaciones.</h2>
+        </div>
+        <div class="mercado-editorial__grid">
+          <article class="valor-card">
+            <span class="valor-card__icono" aria-hidden="true">🥬</span>
+            <h3>Productos frescos</h3>
+            <p>Frutas, lácteos, pan y abarrotes de la zona, presentados con una vitrina más clara y fácil de explorar.</p>
+          </article>
+          <article class="valor-card">
+            <span class="valor-card__icono" aria-hidden="true">🧑‍🌾</span>
+            <h3>Vendedores reales</h3>
+            <p>Conoce quién está detrás de cada producto y contacta directo por WhatsApp con confianza y rapidez.</p>
+          </article>
+          <article class="valor-card">
+            <span class="valor-card__icono" aria-hidden="true">⚡</span>
+            <h3>Compra sin fricción</h3>
+            <p>Busca por categoría, filtra la oferta y lleva la compra a tu ritmo sin perder el toque local.</p>
+          </article>
         </div>
       </div>
     </section>
@@ -162,16 +242,6 @@
             <small>— Rosa, Panadería La Espiga</small>
           </blockquote>
         </div>
-      </div>
-    </section>
-
-    <!-- Vendedores -->
-    <section class="vendedores" id="vendedores">
-      <div class="contenedor">
-        <div class="seccion-cabecera">
-          <div><h2>Vendedores locales</h2><p>Conoce quién está detrás de cada producto.</p></div>
-        </div>
-        <div class="vendedores-rejilla" id="lista-vendedores"></div>
       </div>
     </section>
 
@@ -238,7 +308,7 @@
             <label for="r-nombre">Tu nombre<input type="text" id="r-nombre" placeholder="Ej. Rosita" autocomplete="name" required></label>
             <label for="r-negocio">Tu tienda<input type="text" id="r-negocio" placeholder="Ej. Quesos Rosita" autocomplete="organization" required></label>
           </div>
-          <label for="r-comentario">Tu experiencia <textarea id="r-comentario" rows="4" maxlength="500" placeholder="¿Qué ha significado para ti vender en DE NUESTRA TIERRA?" required></textarea></label>
+          <label for="r-comentario">Tu experiencia <textarea id="r-comentario" rows="4" maxlength="500" placeholder="¿Qué ha significado para ti vender en Cerca de ti?" required></textarea></label>
           <div class="form-reseña-pie">
             <small>Máximo 500 caracteres</small>
             <button type="submit" class="boton boton--verde"><span aria-hidden="true">↗</span> Enviar reseña</button>
@@ -252,8 +322,8 @@
     <section class="preguntas" id="preguntas">
       <div class="contenedor preguntas-caja">
         <h2>Preguntas frecuentes</h2>
-        <details><summary>¿DE NUESTRA TIERRA tiene algún costo?</summary><p>No. Comprar, crear tu tienda y publicar productos es completamente gratis. Los destacados en la portada son opcionales y ayudan a mantener la vitrina.</p></details>
-        <details><summary>¿Cómo pago mis pedidos?</summary><p>Directo con el vendedor: efectivo contra entrega, o Yape / Plin si ambos lo prefieren. DE NUESTRA TIERRA no maneja tu dinero.</p></details>
+        <details><summary>¿Cerca de ti tiene algún costo?</summary><p>No. Comprar, crear tu tienda y publicar productos es completamente gratis. Los destacados en la portada son opcionales y ayudan a mantener la vitrina.</p></details>
+        <details><summary>¿Cómo pago mis pedidos?</summary><p>Directo con el vendedor: efectivo contra entrega, o Yape / Plin si ambos lo prefieren. Cerca de ti no maneja tu dinero.</p></details>
         <details><summary>¿Hacen entregas a domicilio?</summary><p>Cada vendedor coordina su entrega por WhatsApp: en la plaza, en el mercado o hasta tu casa, según la distancia y el pedido.</p></details>
         <details><summary>¿Puedo vender si no tengo tienda física?</summary><p>Sí. Basta con que produzcas o prepares algo y tengas un WhatsApp. Muchos vendedores empezaron así, desde su cocina o su chacra.</p></details>
       </div>
@@ -266,8 +336,8 @@
       <div class="pie-rejilla">
         <div class="pie-marca">
           <a href="#inicio" class="marca">
-            <span class="marca-logo"><img src="DE%20NUESTRA%20TIERRA%20SM.jpeg" alt="Logo de DE NUESTRA TIERRA"></span>
-            <span class="marca-texto"><strong>DE NUESTRA TIERRA</strong><small>Vitrina local de San Marcos</small></span>
+            <span class="marca-logo"><img src="DE%20NUESTRA%20TIERRA%20SM.jpeg" alt="Logo de Cerca de ti"></span>
+            <span class="marca-texto"><strong>Cerca de ti</strong><small>Mercado local de San Marcos</small></span>
           </a>
           <p>Un espacio para descubrir lo mejor de nuestra tierra, con productos frescos, cercanos y hechos con identidad sanmarquina.</p>
         </div>
@@ -292,7 +362,7 @@
         </div>
       </div>
       <div class="pie-base">
-        <span>© 2026 DE NUESTRA TIERRA · Vitrina digital de negocios locales.</span>
+        <span>© 2026 Cerca de ti · Marketplace local de San Marcos.</span>
         <a href="#inicio" class="pie-subir" id="pie-subir">Volver arriba ↑</a>
         <span class="pie-nota">El registro y las publicaciones son gratuitas; los destacados y campañas son opcionales.</span>
       </div>
@@ -411,8 +481,17 @@
         </div>
       </form>
 
+      <div class="panel-publicaciones">
+        <h3>2 · Publicar en la vitrina</h3>
+        <p>Elige qué quieres compartir con quienes exploran Cerca de ti.</p>
+        <div class="panel-publicaciones-acciones">
+          <button type="button" class="boton boton--ambar" id="btn-panel-publicar">＋ Publicar producto</button>
+          <button type="button" class="boton boton--promocion" id="btn-crear-promocion">✦ Crear tarjeta de temporada</button>
+        </div>
+      </div>
+
       <div id="seccion-publicar">
-      <h3>2 · Publicar un producto</h3>
+      <h3>Publicar un producto</h3>
       <p class="modal-nota msg-ok" id="producto-msg" hidden></p>
       <form id="form-producto" class="modal-campos">
         <label class="modal-ancho">Nombre del producto <input type="text" id="g-nombre" required></label>
@@ -456,7 +535,7 @@
       </form>
       </div>
 
-      <h3>2 · Mis productos publicados</h3>
+      <h3>3 · Mis productos publicados</h3>
       <div class="mini-lista" id="lista-mis-productos"></div>
 
       <div id="admin-panel" class="admin-panel" hidden></div>
@@ -484,9 +563,11 @@
       <div class="modal-cabecera">
         <div>
           <h2 id="titulo-admin">Administración</h2>
-          <p>Control total de reseñas, tiendas y productos.</p>
+          <p>Control total de reseñas, tiendas, productos y promociones.</p>
         </div>
       </div>
+      <p class="admin-aviso modal-nota" id="admin-aviso" role="status"></p>
+      <button type="button" class="boton boton--linea boton-chico admin-recargar" id="admin-recargar">Actualizar datos</button>
 
       <div class="admin-seccion">
         <h3>1 · Reseñas pendientes</h3>
@@ -494,20 +575,103 @@
       </div>
 
       <div class="admin-seccion">
-        <h3>2 · Tiendas</h3>
+        <h3>2 · Tiendas <small id="admin-tiendas-conteo"></small></h3>
+        <label class="admin-buscador">Buscar por nombre, categoría o responsable
+          <input type="search" data-admin-buscar="tienda" placeholder="Ej.: Quesos Rosita">
+        </label>
         <div id="admin-tiendas" class="admin-lista"></div>
       </div>
 
       <div class="admin-seccion">
-        <h3>3 · Productos</h3>
+        <h3>3 · Productos <small id="admin-productos-conteo"></small></h3>
+        <label class="admin-buscador">Buscar por producto, categoría o tienda
+          <input type="search" data-admin-buscar="producto" placeholder="Ej.: queso fresco">
+        </label>
         <div id="admin-productos" class="admin-lista"></div>
       </div>
 
       <div class="admin-seccion">
-        <h3>4 · Solicitudes de destacado</h3>
+        <h3>4 · Promociones para revisar</h3>
+        <p class="modal-nota">Las promociones empiezan su cuenta regresiva al aprobarse. Solo las aprobadas aparecen en la vitrina.</p>
+        <div id="admin-promociones" class="admin-lista"></div>
+      </div>
+
+      <div class="admin-seccion">
+        <h3>5 · Solicitudes de destacado</h3>
         <p class="modal-nota">Confirma el pago recibido por WhatsApp antes de activar cada promoción.</p>
         <div id="admin-solicitudes" class="admin-lista"></div>
       </div>
+    </div>
+  </dialog>
+
+  <!-- MODAL: Crear promoción -->
+  <dialog id="modal-promocion" class="modal dialog-ancho" aria-labelledby="titulo-promocion">
+    <div class="modal-form">
+      <button type="button" class="modal-cerrar" data-cerrar aria-label="Cerrar modal">✕</button>
+      <div class="modal-cabecera">
+        <div>
+          <h2 id="titulo-promocion">Crear promoción de temporada</h2>
+          <p>Envíala a revisión. El contador inicia cuando administración la apruebe.</p>
+        </div>
+      </div>
+      <p class="modal-nota msg-ok" id="promocion-msg" role="status" aria-live="polite" hidden></p>
+      <form id="form-promocion" class="modal-campos">
+        <label class="modal-ancho">Usar un producto publicado (opcional)
+          <select id="promo-producto"><option value="">Promoción personalizada</option></select>
+        </label>
+        <label class="modal-ancho">Título de la promoción
+          <input type="text" id="promo-titulo" maxlength="100" required placeholder="Ej.: Temporada de cosecha">
+        </label>
+        <label class="modal-ancho">Descripción
+          <textarea id="promo-descripcion" rows="3" maxlength="500" required placeholder="Cuenta qué hace especial esta promoción."></textarea>
+        </label>
+        <div class="modal-ancho">
+          <label class="foto-picker" for="promo-imagen">
+            <span id="promo-imagen-label">📷 Elegir imagen de la promoción</span>
+            <input type="file" id="promo-imagen" accept="image/jpeg,image/png,image/webp" hidden>
+            <p class="modal-nota">Obligatoria para promociones personalizadas. JPG, PNG o WebP; máximo 6 MB.</p>
+          </label>
+          <div class="promo-imagen-preview" id="promo-imagen-preview"></div>
+        </div>
+        <label class="modal-ancho">Duración después de la aprobación (días)
+          <input type="number" id="promo-dias" min="1" max="30" step="1" value="7" required>
+        </label>
+        <p class="modal-nota modal-ancho">La promoción se elimina al vencer. Las promociones enviadas quedan pendientes hasta que administración las revise.</p>
+        <div class="modal-pie modal-ancho">
+          <button type="submit" id="btn-enviar-promocion" class="boton boton--promocion">Enviar a revisión</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: Edición de producto del vendedor -->
+  <dialog id="modal-editar-producto" class="modal" aria-labelledby="editar-producto-titulo">
+    <div class="modal-form">
+      <button type="button" class="modal-cerrar" data-cerrar aria-label="Cerrar modal">✕</button>
+      <span class="detalle-etiqueta">TU PRODUCTO</span>
+      <h2 id="editar-producto-titulo">Editar producto</h2>
+      <form id="form-editar-producto" class="modal-campos">
+        <input type="hidden" name="producto_id">
+        <label>Nombre del producto<input name="nombre" maxlength="120" required></label>
+        <label>Precio regular (S/)<input name="precio" type="number" min="0" step="0.01" required></label>
+        <label class="modal-ancho">Descripción<textarea name="detalle" rows="3" maxlength="1200"></textarea></label>
+        <div class="descuento-editor modal-ancho">
+          <strong>Oferta para este producto</strong>
+          <p>El precio regular se conserva y el precio con descuento se calcula automáticamente.</p>
+          <label>Descuento<input name="descuento_porcentaje" type="number" min="0" max="90" step="1" value="0" required><small>Usa 0 para quitar la oferta o elige entre 1 % y 90 %.</small></label>
+          <label>Duración
+            <select name="descuento_modo">
+              <option value="permanente">Permanente</option>
+              <option value="dias">Por días</option>
+            </select>
+          </label>
+          <label data-descuento-dias-wrap hidden>Días de vigencia<input name="descuento_dias" type="number" min="1" max="365" step="1" value="7"></label>
+        </div>
+        <p id="editar-producto-msg" class="modal-nota modal-ancho" hidden></p>
+        <div class="modal-pie modal-ancho">
+          <button type="submit" class="boton boton--verde">Guardar producto</button>
+        </div>
+      </form>
     </div>
   </dialog>
 
@@ -526,10 +690,6 @@
         <h2 id="detalle-nombre">Nombre del producto</h2>
         <p class="detalle-descripcion" id="detalle-detalle">Descripción</p>
         <p class="detalle-precio" id="detalle-precio">S/ 0.00</p>
-        <a href="#" class="boton boton--verde detalle-wsp" id="detalle-wsp" target="_blank" rel="noopener">
-          <svg class="icono"><use href="#i-whatsapp"/></svg>
-          Pedir por WhatsApp
-        </a>
         <button type="button" class="detalle-vendedor" id="detalle-vendedor">
           <span class="detalle-vendedor-avatar" id="detalle-vendedor-avatar">🏪</span>
           <span class="detalle-vendedor-texto">
@@ -538,6 +698,10 @@
           </span>
           <span class="detalle-ver-tienda">Ver tienda →</span>
         </button>
+        <a href="#" class="boton boton--verde detalle-wsp" id="detalle-wsp" target="_blank" rel="noopener">
+          <svg class="icono"><use href="#i-whatsapp"/></svg>
+          Contactar por WhatsApp
+        </a>
       </div>
     </div>
   </dialog>

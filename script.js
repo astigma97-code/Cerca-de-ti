@@ -1,5 +1,5 @@
 /* ============================================================
-DE NUESTRA TIERRA · script.js
+Cerca de ti · script.js
 · Cuentas de vendedor (registro / entrada / salida)
 · Perfil editable: negocio, descripción, dirección, foto/emoji
 · Publicación de productos con carrusel de hasta 6 fotos
@@ -22,13 +22,51 @@ const PLANES_DESTACADO = {
   '30': { dias: 30, precio: 30 }
 };
 const LOCAL_APP_KEY = 'de_nuestra_tierra_state_v1';
+const VERSION_PROMOCIONES_DEMO = 3;
+const BUSQUEDAS_POPULARES_KEY = 'cerca_de_ti_busquedas_v1';
+const INTERACCIONES_PRODUCTO_KEY = 'cerca_de_ti_interacciones_v1';
+const PESO_CONTACTO_WHATSAPP = 10;
+const VERSION_CATALOGO_DEMO = 5;
 const IDS_DEMO = new Set(['v-1', 'v-2', 'v-3']);
-const esDatoDemo = dato => IDS_DEMO.has(dato.id) || ['p-1', 'p-2', 'p-3', 'p-4'].includes(dato.id);
+const esDatoDemo = dato => {
+  const id = dato?.id;
+  if (!id || typeof id !== 'string') return false;
+  return id.startsWith('demo-') || IDS_DEMO.has(id) || ['p-1', 'p-2', 'p-3', 'p-4'].includes(id);
+};
 
 /* ---------- Utilidades ---------- */
 const $ = (s, c = document) => c.querySelector(s);
 const $$ = (s, c = document) => [...c.querySelectorAll(s)];
 const normalizar = t => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const palabrasBusqueda = texto => normalizar(texto).split(/[^a-z0-9]+/).filter(Boolean);
+function distanciaEdicion(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let anteriorAnterior = null;
+  let anterior = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const actual = [i];
+    for (let j = 1; j <= b.length; j++) {
+      actual[j] = Math.min(
+        anterior[j] + 1,
+        actual[j - 1] + 1,
+        anterior[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        actual[j] = Math.min(actual[j], anteriorAnterior[j - 2] + 1);
+      }
+    }
+    anteriorAnterior = anterior;
+    anterior = actual;
+  }
+  return anterior[b.length];
+}
+function coincideBusqueda(termino, palabras) {
+  const maxErrores = termino.length >= 8 ? 2 : termino.length >= 4 ? 1 : 0;
+  return palabras.some(palabra =>
+    palabra.includes(termino) ||
+    (maxErrores > 0 && distanciaEdicion(termino, palabra) <= maxErrores)
+  );
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const urlImagen = valor => {
   if (!valor) return '';
@@ -44,7 +82,11 @@ const soloDigitos = s => (s || '').replace(/\D/g, '');
 const fmtPrecio = n => (+n).toFixed(2).replace(/\.00$/, '');
 const categoriaFiltro = categoria => {
   const clave = categoriaClase(categoria);
-  return { 'panaderia-y-reposteria': 'panaderia', 'textiles-y-ropa': 'textiles' }[clave] || clave;
+  return {
+    'panaderia-y-reposteria': 'panaderia',
+    'textiles-y-ropa': 'textiles',
+    'belleza-y-cuidado': 'belleza'
+  }[clave] || clave;
 };
 const fechaCorta = fecha => new Date(fecha).toLocaleDateString('es-PE');
 const destacadoVigente = p => Boolean(p.destacado && (!p.destacado_hasta || new Date(p.destacado_hasta) > new Date()));
@@ -59,25 +101,161 @@ const categoriaClase = categoria => normalizar(categoria || 'otro').replace(/[^a
 const etiquetasProducto = producto => Array.isArray(producto?.tags)
   ? producto.tags.filter(Boolean).map(String).slice(0, 5)
   : [];
+function descuentoVigente(producto) {
+  const porcentaje = Number(producto?.descuento_porcentaje) || 0;
+  if (!Number.isInteger(porcentaje) || porcentaje < 1 || porcentaje > 90) return false;
+  if (!producto.descuento_hasta) return true;
+  const vence = new Date(producto.descuento_hasta).getTime();
+  return Number.isFinite(vence) && vence > Date.now();
+}
+function precioConDescuento(producto) {
+  const precio = Number(producto?.precio) || 0;
+  return descuentoVigente(producto)
+    ? Number((precio * (1 - Number(producto.descuento_porcentaje) / 100)).toFixed(2))
+    : precio;
+}
+function vistaPrecioProducto(producto, clase = 'producto-precio') {
+  if (!descuentoVigente(producto)) return `<span class="${clase}">S/ ${fmtPrecio(producto.precio)}</span>`;
+  return `<span class="${clase} precio-oferta"><del>S/ ${fmtPrecio(producto.precio)}</del><strong>S/ ${fmtPrecio(precioConDescuento(producto))}</strong></span>`;
+}
 function guardarProductoLocal(producto) {
   const state = readLocalState();
   state.productos = [...state.productos.filter(item => item.id !== producto.id), { ...producto }];
   writeLocalState(state);
 }
-async function guardarDestacado(tabla, id, destacado, hasta) {
-  const completo = await db.from(tabla).update({ destacado, destacado_hasta: hasta }).eq('id', id);
-  if (completo.error) {
-    const compatible = await db.from(tabla).update({ destacado }).eq('id', id);
-    if (compatible.error) throw compatible.error;
+function leerContadoresLocales(clave) {
+  const guardado = localStorage.getItem(clave);
+  if (!guardado) return {};
+  try {
+    const contadores = JSON.parse(guardado);
+    return contadores && typeof contadores === 'object' && !Array.isArray(contadores) ? contadores : {};
+  } catch (error) {
+    console.warn(`No se pudieron leer los contadores locales de ${clave}:`, error);
+    return {};
   }
+}
+function registrarBusquedaPopular(texto) {
+  const consulta = texto.trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (consulta.length < 2) return;
+  const clave = normalizar(consulta);
+  const busquedas = leerContadoresLocales(BUSQUEDAS_POPULARES_KEY);
+  busquedas[clave] = { texto: consulta, cantidad: Math.min(1000000, (Number(busquedas[clave]?.cantidad) || 0) + 1) };
+  const masBuscadas = Object.entries(busquedas)
+    .sort(([, a], [, b]) => Number(b.cantidad) - Number(a.cantidad))
+    .slice(0, 20);
+  localStorage.setItem(BUSQUEDAS_POPULARES_KEY, JSON.stringify(Object.fromEntries(masBuscadas)));
+pintarBusquedasPopulares();
+}
+function registrarInteraccionProducto(id, tipo) {
+  if (esDatoDemo({ id })) return;
+  const interacciones = leerContadoresLocales(INTERACCIONES_PRODUCTO_KEY);
+  const registro = interacciones[id] || { detalle: 0, whatsapp: 0 };
+  registro[tipo] = Math.min(1000000, (Number(registro[tipo]) || 0) + 1);
+  interacciones[id] = registro;
+  localStorage.setItem(INTERACCIONES_PRODUCTO_KEY, JSON.stringify(interacciones));
+}
+function puntuacionInteraccionProducto(producto, interacciones) {
+  const registro = interacciones[producto.id] || {};
+  return (Number(registro.detalle) || 0) + PESO_CONTACTO_WHATSAPP * (Number(registro.whatsapp) || 0);
+}
+function pintarBusquedasPopulares() {
+  const busquedas = Object.values(leerContadoresLocales(BUSQUEDAS_POPULARES_KEY))
+    .filter(busqueda => busqueda && typeof busqueda.texto === 'string' && Number(busqueda.cantidad) > 0)
+    .sort((a, b) => Number(b.cantidad) - Number(a.cantidad))
+    .slice(0, 3);
+  const sugerencias = busquedas.length
+    ? busquedas.map(busqueda => busqueda.texto)
+    : ['queso fresco', 'pan de hogar', 'miel'];
+  $('#busquedas-populares').innerHTML = sugerencias
+    .map(consulta => `<button type="button" data-busqueda-popular="${esc(consulta)}">${esc(consulta)}</button>`)
+    .join('');
+}
+async function guardarDestacado(tabla, id, destacado, hasta) {
+  if (esDatoDemo({ id })) {
+    const state = readLocalState();
+    const registro = tabla === 'vendedores'
+      ? state.vendedores[id]
+      : state.productos.find(producto => producto.id === id);
+    if (!registro) throw new Error('El elemento de demostración ya no existe.');
+    registro.destacado = destacado;
+    registro.destacado_hasta = hasta;
+    writeLocalState(state);
+    return;
+  }
+  const completo = await db.from(tabla).update({ destacado, destacado_hasta: hasta }).eq('id', id);
+  if (completo.error) throw completo.error;
   const verificado = await db.from(tabla).select('id, destacado, destacado_hasta').eq('id', id).maybeSingle();
   if (verificado.error) throw verificado.error;
   if (!verificado.data || Boolean(verificado.data.destacado) !== Boolean(destacado)) {
     throw new Error('El destacado no pudo guardarse. Verifica los permisos de Supabase.');
   }
-  if (hasta && verificado.data.destacado_hasta && new Date(verificado.data.destacado_hasta).getTime() !== new Date(hasta).getTime()) {
+  if (hasta && (!verificado.data.destacado_hasta || new Date(verificado.data.destacado_hasta).getTime() !== new Date(hasta).getTime())) {
     throw new Error('La fecha guardada no coincide con la fecha seleccionada.');
   }
+}
+
+async function actualizarRegistroAdmin(tabla, id, cambios) {
+  if (esDatoDemo({ id })) {
+    const state = readLocalState();
+    const registro = tabla === 'vendedores'
+      ? state.vendedores[id]
+      : state.productos.find(producto => producto.id === id);
+    if (!registro) throw new Error('El elemento de demostración ya no existe.');
+    Object.assign(registro, cambios);
+    writeLocalState(state);
+    return { ...registro };
+  }
+  const actualizado = await db.from(tabla).update(cambios).eq('id', id);
+  if (actualizado.error) throw actualizado.error;
+  const verificado = await db.from(tabla).select('*').eq('id', id).maybeSingle();
+  if (verificado.error) throw verificado.error;
+  if (!verificado.data || Object.entries(cambios).some(([campo, valor]) => {
+    const actual = verificado.data[campo];
+    if (typeof valor === 'number') return Number(actual) !== valor;
+    return JSON.stringify(actual) !== JSON.stringify(valor);
+  })) {
+    throw new Error('No se guardaron todos los cambios. Verifica los permisos y la conexión.');
+  }
+  return verificado.data;
+}
+
+const DIAS_MAX_DESTACADO = 365;
+const MILISEGUNDOS_DIA = 24 * 60 * 60 * 1000;
+const vencimientoDestacado = dias => new Date(Date.now() + dias * MILISEGUNDOS_DIA);
+const textoVencimiento = dias => vencimientoDestacado(dias).toLocaleString('es-PE', {
+  dateStyle: 'medium',
+  timeStyle: 'short'
+});
+const diasRestantesDestacado = item => {
+  const vencimiento = item.destacado_hasta ? new Date(item.destacado_hasta).getTime() : NaN;
+  const restante = vencimiento - Date.now();
+  return Number.isFinite(vencimiento) && restante > 0
+    ? Math.min(DIAS_MAX_DESTACADO, Math.max(1, Math.ceil(restante / MILISEGUNDOS_DIA)))
+    : 30;
+};
+function controlesDestacado(tipo, item) {
+  const activo = destacadoVigente(item);
+  const identificador = tipo === 'tienda' ? 'tienda' : 'producto';
+  const id = esc(item.id);
+  const dias = Math.min(DIAS_MAX_DESTACADO, diasRestantesDestacado(item));
+  const tieneVencimiento = activo && Boolean(item.destacado_hasta);
+  const vencimiento = tieneVencimiento
+    ? new Date(item.destacado_hasta)
+    : vencimientoDestacado(dias);
+  return `<div class="admin-destacado">
+    <label for="dias-${identificador}-${id}">Duración del destacado (días)
+      <input id="dias-${identificador}-${id}" type="number" min="1" max="${DIAS_MAX_DESTACADO}" step="1" value="${dias}" data-dias-destacado="${identificador}" data-id="${id}">
+    </label>
+    <small>${tieneVencimiento ? 'Vence:' : 'Finaliza al activar:'} <time datetime="${vencimiento.toISOString()}" data-vencimiento-destacado="${identificador}" data-id="${id}">${esc(vencimiento.toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' }))}</time></small>
+    <div class="admin-actions">
+      <button type="button" class="boton-destacar" data-activar-destacado="${identificador}" data-id="${id}">${activo ? 'Renovar destacado' : 'Destacar'}</button>
+      ${activo ? `<button type="button" class="boton-peligro" data-quitar-destacado="${identificador}" data-id="${id}">Quitar destacado</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function opcionesCategoriaAdmin(categoria) {
+  return CATEGORIAS_DEMO.map(opcion => `<option value="${esc(opcion)}"${opcion === categoria ? ' selected' : ''}>${esc(opcion)}</option>`).join('');
 }
 
 async function eliminarRegistros(tabla, filtros = []) {
@@ -87,39 +265,361 @@ async function eliminarRegistros(tabla, filtros = []) {
   if (resultado.error) throw resultado.error;
 }
 async function eliminarRegistro(tabla, id, filtros = []) {
+  if (esDatoDemo({ id })) {
+    const state = readLocalState();
+    if (tabla === 'productos') state.productos = state.productos.filter(producto => producto.id !== id);
+    if (tabla === 'vendedores') delete state.vendedores[id];
+    if (tabla === 'promociones') state.promociones = state.promociones.filter(promocion => promocion.id !== id);
+    writeLocalState(state);
+    return;
+  }
   await eliminarRegistros(tabla, [['id', id], ...filtros]);
+  const verificado = await db.from(tabla).select('id').eq('id', id).maybeSingle();
+  if (verificado.error) throw verificado.error;
+  if (verificado.data) throw new Error('El registro sigue publicado. Verifica los permisos y vuelve a intentarlo.');
 }
 
 async function eliminarTienda(id) {
   const idsProductos = productos.filter(producto => producto.vendedor_id === id).map(producto => producto.id);
-  await eliminarRegistros('productos', [['vendedor_id', id]]);
+  if (!usaSupabase || esDatoDemo({ id })) {
+    const state = readLocalState();
+    state.productos = state.productos.filter(producto => producto.vendedor_id !== id);
+    delete state.vendedores[id];
+    writeLocalState(state);
+    return idsProductos;
+  }
   await eliminarRegistro('vendedores', id);
   return idsProductos;
+}
+async function eliminarFotosProductos(registros) {
+  const rutas = [...new Set(registros.flatMap(producto => {
+    const fotos = Array.isArray(producto.fotos) ? producto.fotos : [];
+    return fotos.map(foto => {
+      const marcador = '/fotos/';
+      const indice = String(foto).indexOf(marcador);
+      if (indice < 0) return '';
+      try {
+        return decodeURIComponent(String(foto).slice(indice + marcador.length));
+      } catch {
+        return '';
+      }
+    }).filter(Boolean);
+  }))];
+  if (!rutas.length) return;
+  const { error } = await db.storage.from('fotos').remove(rutas);
+  if (error) throw new Error(`La publicación ya se eliminó, pero no se pudieron retirar sus fotos: ${error.message}`);
+}
+async function leerTablaCompleta(tabla, ordenes = []) {
+  const limitePagina = 500;
+  const registros = [];
+  for (let desde = 0; ; desde += limitePagina) {
+    let consulta = db.from(tabla).select('*');
+    ordenes.forEach(([campo, ascending]) => { consulta = consulta.order(campo, { ascending }); });
+    const { data, error } = await consulta.range(desde, desde + limitePagina - 1);
+    if (error) throw error;
+    registros.push(...(data || []));
+    if (!data || data.length < limitePagina) return registros;
+  }
 }
 const espera = (fn, ms = 220) => { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; };
 
 const defaultState = {
   productos: [],
   vendedores: {},
+  promociones: [],
   reseñas: [],
   solicitudesDestacado: []
 };
 
+const CATEGORIAS_DEMO = [
+  'Alimentos', 'Lácteos', 'Carnes', 'Frutas y verduras', 'Abarrotes', 'Bebidas',
+  'Panadería y repostería', 'Agro', 'Plantas y semillas', 'Artesanía', 'Textiles y ropa',
+  'Belleza y cuidado', 'Hogar', 'Salud', 'Ferretería', 'Construcción', 'Automotriz',
+  'Servicios', 'Mascotas', 'Tecnología', 'Otro'
+];
+
+const NOMBRES_DEMO = {
+  Alimentos: ['Humitas de choclo', 'Tamal cajamarquino', 'Cuy frito preparado', 'Choclo con queso', 'Mote pelado cocido', 'Caldo de gallina', 'Trucha frita', 'Patarashca de pescado', 'Papas con ají', 'Mazamorra de maíz'],
+  'Lácteos': ['Queso mantecoso cajamarquino', 'Quesillo fresco', 'Queso fresco de vaca', 'Yogur natural', 'Leche fresca pasteurizada', 'Manjar blanco', 'Mantequilla artesanal', 'Cuajada de leche', 'Queso con hierbas', 'Yogur de fresa'],
+  Carnes: ['Carne de res para guiso', 'Bistec de res', 'Costilla de cerdo', 'Chuleta de cerdo', 'Pollo entero fresco', 'Pechuga de pollo', 'Carne molida de res', 'Carne de cordero', 'Chorizo de cerdo', 'Cecina de res'],
+  'Frutas y verduras': ['Papa amarilla', 'Choclo fresco', 'Tomate de huerto', 'Palta de temporada', 'Zanahoria fresca', 'Lechuga recién cosechada', 'Cebolla roja', 'Limón sutil', 'Plátano de seda', 'Rocoto fresco'],
+  Abarrotes: ['Arroz extra', 'Azúcar rubia', 'Aceite vegetal', 'Lenteja seca', 'Frijol canario', 'Harina de trigo', 'Fideos tallarín', 'Sal yodada', 'Avena en hojuelas', 'Café molido de Cajamarca'],
+  Bebidas: ['Chicha morada', 'Refresco de cebada', 'Jugo de granadilla', 'Limonada natural', 'Café pasado', 'Agua de hierbaluisa', 'Emoliente tradicional', 'Jugo de naranja', 'Bebida de maracuyá', 'Agua de mesa'],
+  'Panadería y repostería': ['Pan de trigo', 'Pan de maíz', 'Pan de yema', 'Rosquitas cajamarquinas', 'Torta de chocolate', 'Queque de naranja', 'Empanada de queso', 'Bizcocho casero', 'Alfajores artesanales', 'Galletas de mantequilla'],
+  Agro: ['Abono orgánico compostado', 'Fertilizante para papa', 'Semilla certificada de maíz', 'Semilla de pasto para ganado', 'Alimento balanceado para cuyes', 'Cal agrícola para cultivo', 'Sustrato para almácigos', 'Compost para chacra', 'Manguera para riego agrícola', 'Herramienta manual para cultivo'],
+  'Plantas y semillas': ['Planta de hierbabuena', 'Planta de romero', 'Plantón de palta', 'Planta de sábila', 'Semillas de lechuga', 'Semillas de tomate', 'Semillas de culantro', 'Plantón de rocoto', 'Planta ornamental de geranio', 'Semillas de zapallo'],
+  Artesanía: ['Canasta de carrizo', 'Olla de barro hecha a mano', 'Taza de cerámica artesanal', 'Tallado de madera decorativo', 'Jarrón de arcilla', 'Cesto tejido de mimbre', 'Máscara artesanal de madera', 'Adorno de piedra tallada', 'Portavelas de cerámica', 'Muñeca artesanal de tela'],
+  'Textiles y ropa': ['Chompa de lana tejida', 'Poncho cajamarquino', 'Chalina de lana', 'Gorro tejido a mano', 'Manta de algodón', 'Medias de lana', 'Blusa bordada', 'Delantal de cocina', 'Bolso de tela', 'Ropa infantil de algodón'],
+  'Belleza y cuidado': ['Jabón artesanal de avena', 'Champú de uso diario', 'Acondicionador para cabello', 'Crema humectante para manos', 'Protector solar', 'Bálsamo labial', 'Peine de madera', 'Aceite corporal', 'Esponja de baño', 'Kit de cuidado personal'],
+  Hogar: ['Olla de cocina', 'Sartén antiadherente', 'Juego de platos', 'Vaso de vidrio', 'Escoba para el hogar', 'Balde plástico', 'Mantel de mesa', 'Cortina para ventana', 'Frazada de cama', 'Organizador de cocina'],
+  Salud: ['Termómetro digital', 'Botiquín de primeros auxilios', 'Venda elástica', 'Gasas estériles', 'Mascarillas descartables', 'Alcohol antiséptico', 'Curitas adhesivas', 'Guantes descartables', 'Compresa fría reutilizable', 'Pastillero semanal'],
+  Ferretería: ['Martillo de acero', 'Destornillador plano', 'Alicate universal', 'Llave inglesa ajustable', 'Taladro eléctrico', 'Cinta métrica de 5 metros', 'Juego de tornillos', 'Candado de seguridad', 'Serrucho para madera', 'Extensión eléctrica'],
+  'Construcción': ['Bolsa de cemento', 'Ladrillo para muro', 'Bloque de concreto', 'Arena gruesa por metro', 'Piedra chancada', 'Varilla de acero', 'Ladrillo pastelero', 'Cal para construcción', 'Lámina de calamina', 'Cerámico para piso'],
+  Automotriz: ['Aceite para motor', 'Filtro de aceite', 'Filtro de aire para auto', 'Batería para automóvil', 'Pastillas de freno', 'Bujía para motor', 'Refrigerante para radiador', 'Plumillas limpiaparabrisas', 'Cámara para motocicleta', 'Foco para faro de vehículo'],
+  Servicios: ['Reparación de calzado', 'Corte de cabello', 'Servicio de costura', 'Reparación de electrodomésticos', 'Mantenimiento de motocicleta', 'Instalación de gasfitería', 'Servicio de jardinería', 'Pintura de vivienda', 'Transporte de carga local', 'Limpieza de hogar'],
+  Mascotas: ['Alimento para perro adulto', 'Alimento para gato', 'Correa para perro', 'Collar para mascota', 'Cama para perro', 'Plato para alimento', 'Arena sanitaria para gato', 'Juguete para mascota', 'Cepillo para perro', 'Transportadora para gato'],
+  Tecnología: ['Cargador USB-C', 'Cable USB-C', 'Audífonos con cable', 'Parlante Bluetooth', 'Mouse inalámbrico', 'Teclado USB', 'Memoria USB de 32 GB', 'Power bank portátil', 'Foco LED inteligente', 'Soporte para celular'],
+  Otro: ['Canasta de regalo local', 'Tarjeta de felicitación', 'Papel de regalo', 'Llaveros variados', 'Calendario de pared', 'Vela decorativa', 'Bolsa reutilizable', 'Souvenir de San Marcos', 'Caja organizadora', 'Artículo de temporada']
+};
+
+const FOTOS_DEMO = {
+  Alimentos: 'photo-1547592180-85f173990554',
+  'Lácteos': 'photo-1550583724-b2692b85b150',
+  Carnes: 'photo-1607623814075-e51df1bdc82f',
+  'Frutas y verduras': 'photo-1542838132-92c53300491e',
+  Abarrotes: 'photo-1586201375761-83865001e31c',
+  Bebidas: 'photo-1544145945-f90425340c7e',
+  'Panadería y repostería': 'photo-1509440159596-0249088772ff',
+  Agro: 'photo-1500382017468-9049fed747ef',
+  'Plantas y semillas': 'photo-1416879595882-3373a0480b5b',
+  Artesanía: 'photo-1452860606245-08befc0ff44b',
+  'Textiles y ropa': 'photo-1558618666-fcd25c85cd64',
+  'Belleza y cuidado': 'photo-1608248543803-ba4f8c70ae0b',
+  Hogar: 'photo-1555041469-a586c61ea9bc',
+  Salud: 'photo-1603398938378-e54eab446dde',
+  Ferretería: 'photo-1530124566582-a618bc2615dc',
+  'Construcción': 'photo-1504307651254-35680f356dfd',
+  Automotriz: 'photo-1486262715619-67b85e0b08d3',
+  Servicios: 'photo-1521737711867-e3b97375f902',
+  Mascotas: 'photo-1450778869180-41d0601e046e',
+  Tecnología: 'photo-1518770660439-4636190af475',
+  Otro: 'photo-1513519245088-0e12902e5a38'
+};
+
+const DESCRIPCIONES_DEMO = {
+  Alimentos: 'Preparación de inspiración cajamarquina. Precio referencial por porción; consulta disponibilidad y recojo.',
+  'Lácteos': 'Producto lácteo de muestra. Mantener refrigerado y confirmar presentación antes de coordinar el pedido.',
+  Carnes: 'Corte de muestra vendido por peso. Consulta disponibilidad, conservación y presentación al vendedor.',
+  'Frutas y verduras': 'Producto de temporada de muestra. El tamaño y el precio pueden variar según la cosecha.',
+  Abarrotes: 'Producto básico de despensa en presentación referencial. Consulta el peso o contenido del empaque.',
+  Bebidas: 'Bebida de muestra preparada o envasada. Consulta el tamaño de la presentación y su disponibilidad.',
+  'Panadería y repostería': 'Horneado de muestra preparado para compartir. Consulta tamaño, sabores disponibles y horario de recojo.',
+  Agro: 'Insumo de muestra para labores agrícolas. Verifica composición, presentación e indicaciones de uso.',
+  'Plantas y semillas': 'Planta o semilla de muestra para huerto y jardín. Consulta temporada, cuidados y tamaño disponible.',
+  Artesanía: 'Pieza de muestra elaborada a mano. Cada unidad puede tener variaciones de acabado y medidas.',
+  'Textiles y ropa': 'Prenda o accesorio de muestra. Consulta tallas, medidas, material y colores disponibles.',
+  'Belleza y cuidado': 'Artículo de cuidado personal de muestra. Revisa ingredientes, contenido y recomendaciones del fabricante.',
+  Hogar: 'Artículo de muestra para uso cotidiano. Consulta medidas, material y disponibilidad antes de coordinar.',
+  Salud: 'Artículo de botiquín de muestra. Verifica empaque, registro e indicaciones del fabricante antes de adquirirlo.',
+  Ferretería: 'Herramienta o accesorio de muestra. Consulta medidas, material y compatibilidad con el trabajo que realizarás.',
+  'Construcción': 'Material de construcción de muestra. Precio referencial; confirma unidad, cantidad y entrega.',
+  Automotriz: 'Repuesto o accesorio de muestra. Confirma marca, modelo y compatibilidad con tu vehículo antes de comprar.',
+  Servicios: 'Servicio de muestra disponible para coordinar en San Marcos. Consulta alcance, horario y cotización.',
+  Mascotas: 'Producto de muestra para mascotas. Revisa talla, contenido y recomendaciones según el animal.',
+  Tecnología: 'Accesorio tecnológico de muestra. Confirma modelo, conexión, compatibilidad y garantía.',
+  Otro: 'Artículo de muestra de un emprendimiento local. Consulta detalles, medidas y disponibilidad.'
+};
+
+const PRECIOS_DEMO = {
+  Alimentos: [7, 2], 'Lácteos': [5, 2], Carnes: [12, 4], 'Frutas y verduras': [2, 1.5],
+  Abarrotes: [2.5, 2], Bebidas: [3, 1.5], 'Panadería y repostería': [1.5, 2],
+  Agro: [8, 7], 'Plantas y semillas': [3, 4], Artesanía: [12, 8], 'Textiles y ropa': [15, 8],
+  'Belleza y cuidado': [5, 4], Hogar: [4, 8], Salud: [2, 5], Ferretería: [3, 8],
+  'Construcción': [4, 8], Automotriz: [8, 20], Servicios: [15, 10], Mascotas: [4, 8],
+  Tecnología: [5, 12], Otro: [3, 6]
+};
+
+function generarCatalogoDemo() {
+  const nombresVendedores = [
+    'Sabores de San Marcos', 'Quesos Rosita', 'Carnicería La Granja', 'Frutas del Valle', 'Bodega Central',
+    'Bebidas del Valle', 'La Espiga', 'Semillas y Campo', 'Jardín de la Casa', 'Casa de Artesanía',
+    'Tejidos San Marcos', 'Cuidado Natural', 'Hogar y Más', 'Botiquín del Barrio', 'Ferretería Central',
+    'Materiales San Marcos', 'Repuestos El Volante', 'Servicios del Barrio', 'Patitas Felices',
+    'Tecnología Central', 'Regalos de Aquí'
+  ];
+  const vendedores = CATEGORIAS_DEMO.map((categoria, idx) => ({
+    id: `demo-v-${idx + 1}`,
+    negocio: nombresVendedores[idx],
+    responsable: `Emprendedor ${idx + 1}`,
+    whatsapp: `51987654${String(idx + 1).padStart(3, '0')}`,
+    categoria,
+    descripcion: `Ejemplos de ${categoria.toLowerCase()} para probar la vitrina.`,
+    avatar_emoji: EMOJI_CAT[categoria] || '🏪',
+    direccion: 'San Marcos, Cajamarca'
+  }));
+
+  const productos = [];
+  const ofertasDemo = {
+    'Lácteos': { porcentaje: 15, dias: 6 },
+    'Frutas y verduras': { porcentaje: 20, dias: 3 },
+    'Panadería y repostería': { porcentaje: 10, dias: 5 },
+    'Artesanía': { porcentaje: 25, dias: 0 },
+    'Bebidas': { porcentaje: 30, dias: 4 },
+    'Plantas y semillas': { porcentaje: 12, dias: 7 }
+  };
+  CATEGORIAS_DEMO.forEach((categoria, idx) => {
+    const vendedor = vendedores[idx];
+    const nombreBase = NOMBRES_DEMO[categoria];
+    nombreBase.forEach((nombre, i) => {
+      const [precioInicial, incremento] = PRECIOS_DEMO[categoria];
+      const precio = precioInicial + (i * incremento);
+      const slug = `${categoriaClase(categoria)}-${i + 1}`;
+      const oferta = i === 1 ? ofertasDemo[categoria] : null;
+      productos.push({
+        id: `demo-p-${slug}`,
+        nombre,
+        detalle: DESCRIPCIONES_DEMO[categoria],
+        precio: Number(precio.toFixed(2)),
+        descuento_porcentaje: oferta?.porcentaje || 0,
+        descuento_hasta: oferta?.dias ? new Date(Date.now() + oferta.dias * MILISEGUNDOS_DIA).toISOString() : null,
+        categoria,
+        vendedor_id: vendedor.id,
+        fotos: [`https://images.unsplash.com/${FOTOS_DEMO[categoria]}?auto=format&fit=crop&w=900&q=80`],
+        emoji: EMOJI_CAT[categoria] || '🛍️',
+        tags: [],
+        creado_en: new Date(Date.now() - (i + idx) * 600000).toISOString(),
+        destacado: i === 0,
+        destacado_hasta: i === 0 ? new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString() : null,
+        stock: 10 + i,
+        activo: true,
+        vendedor: vendedor.negocio,
+        origen: 'demo'
+      });
+    });
+  });
+
+  return { vendedores: Object.fromEntries(vendedores.map(v => [v.id, v])), productos };
+}
+
+function generarPromocionesDemo() {
+  const ahora = Date.now();
+  return [
+    {
+      id: 'demo-promo-verano',
+      vendedor_id: 'demo-v-2',
+      producto_id: 'demo-p-lacteos-1',
+      titulo: 'Verano fresco · Queso mantecoso',
+      descripcion: 'Disfruta el sabor de Cajamarca con precio especial por temporada. Pregunta por presentaciones y disponibilidad.',
+      imagen_url: 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 4,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 4 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-invierno',
+      vendedor_id: 'demo-v-7',
+      producto_id: 'demo-p-panaderia-y-reposteria-1',
+      titulo: 'Invierno calientito · Pan recién horneado',
+      descripcion: 'Acompaña tus tardes con pan artesanal recién hecho. Oferta de temporada hasta agotar stock.',
+      imagen_url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 6,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 6 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-cosecha',
+      vendedor_id: 'demo-v-4',
+      producto_id: 'demo-p-frutas-y-verduras-1',
+      titulo: 'Cosecha del valle · Frutas frescas',
+      descripcion: 'Lleva frutas de temporada recién seleccionadas, directo de productores locales. Consulta por cajas y variedades.',
+      imagen_url: 'https://images.unsplash.com/photo-1619566636858-adf3ef46400b?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 8,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 8 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-artesania',
+      vendedor_id: 'demo-v-10',
+      producto_id: 'demo-p-artesania-1',
+      titulo: 'Hecho a mano · Artesanía local',
+      descripcion: 'Piezas únicas elaboradas por artesanos de San Marcos. Encuentra un detalle especial y apoya el trabajo local.',
+      imagen_url: 'https://images.unsplash.com/photo-1452860606245-08befc0ff44b?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 10,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 10 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-plantas',
+      vendedor_id: 'demo-v-9',
+      producto_id: 'demo-p-plantas-y-semillas-1',
+      titulo: 'Renueva tu jardín · Plantas de temporada',
+      descripcion: 'Dale vida a tus espacios con plantas y semillas seleccionadas. Pregunta por cuidados y disponibilidad.',
+      imagen_url: 'https://images.unsplash.com/photo-1485955900006-10f4d324d411?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 9,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 9 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-campo',
+      vendedor_id: 'demo-v-8',
+      producto_id: 'demo-p-agro-1',
+      titulo: 'Del campo a tu mesa · Productos de chacra',
+      descripcion: 'Aprovecha esta selección de productos del campo, cultivados con dedicación por pequeños productores de la zona.',
+      imagen_url: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 5,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 5 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    },
+    {
+      id: 'demo-promo-bebidas',
+      vendedor_id: 'demo-v-6',
+      producto_id: 'demo-p-bebidas-1',
+      titulo: 'Sabor de temporada · Bebidas locales',
+      descripcion: 'Prueba bebidas preparadas con ingredientes de nuestra tierra. Consulta sabores disponibles y haz tu pedido directo.',
+      imagen_url: 'https://images.unsplash.com/photo-1536935338788846bb9981813?auto=format&fit=crop&w=1400&q=85',
+      duracion_dias: 7,
+      estado: 'aprobada',
+      creado_en: new Date(ahora).toISOString(),
+      vence_en: new Date(ahora + 7 * MILISEGUNDOS_DIA).toISOString(),
+      origen: 'demo'
+    }
+  ];
+}
+
 const readLocalState = () => {
   try {
     const item = localStorage.getItem(LOCAL_APP_KEY);
-    if (!item) {
-      localStorage.setItem(LOCAL_APP_KEY, JSON.stringify(defaultState));
-      return JSON.parse(JSON.stringify(defaultState));
-    }
-    const parsed = JSON.parse(item);
+    const parsed = item ? JSON.parse(item) : {};
+    const catalogoDemoGuardado = parsed.versionCatalogoDemo === VERSION_CATALOGO_DEMO;
+    const demo = catalogoDemoGuardado
+      ? {
+        vendedores: Object.fromEntries(Object.entries(parsed.vendedores || {}).filter(([, vendedor]) => esDatoDemo(vendedor))),
+        productos: (parsed.productos || []).filter(producto => esDatoDemo(producto))
+      }
+      : generarCatalogoDemo();
+    const promocionesDemo = parsed.versionPromocionesDemo === VERSION_PROMOCIONES_DEMO
+      ? (parsed.promociones || []).filter(promocion => esDatoDemo(promocion))
+      : generarPromocionesDemo();
     const vendedoresReales = Object.fromEntries(Object.entries(parsed.vendedores || {}).filter(([, vendedor]) => !esDatoDemo(vendedor)));
     const productosReales = (parsed.productos || []).filter(producto => !esDatoDemo(producto));
-    const actualizado = { ...JSON.parse(JSON.stringify(defaultState)), ...parsed, vendedores: vendedoresReales, productos: productosReales, reseñas: parsed.reseñas || [], solicitudesDestacado: parsed.solicitudesDestacado || [] };
+    const promocionesReales = (parsed.promociones || []).filter(promocion => !esDatoDemo(promocion));
+    const actualizado = {
+      ...JSON.parse(JSON.stringify(defaultState)),
+      ...parsed,
+      ...demo,
+      vendedores: { ...demo.vendedores, ...vendedoresReales },
+      productos: [...demo.productos, ...productosReales],
+      promociones: [...promocionesDemo, ...promocionesReales],
+      versionCatalogoDemo: VERSION_CATALOGO_DEMO,
+      versionPromocionesDemo: VERSION_PROMOCIONES_DEMO,
+      reseñas: parsed.reseñas || [],
+      solicitudesDestacado: parsed.solicitudesDestacado || []
+    };
     writeLocalState(actualizado);
     return actualizado;
   } catch {
-    return JSON.parse(JSON.stringify(defaultState));
+    const demo = generarCatalogoDemo();
+    const base = {
+      ...JSON.parse(JSON.stringify(defaultState)),
+      ...demo,
+      promociones: generarPromocionesDemo(),
+      versionCatalogoDemo: VERSION_CATALOGO_DEMO,
+      versionPromocionesDemo: VERSION_PROMOCIONES_DEMO
+    };
+    writeLocalState(base);
+    return base;
   }
 };
 
@@ -138,16 +638,41 @@ const makeLocalDb = () => {
         ? Object.values(snapshot.vendedores)
         : table === 'reseñas'
           ? snapshot.reseñas
-          : [];
+            : table === 'promociones'
+              ? snapshot.promociones
+            : [];
 
     const api = {
       _table: table,
       _filters: [],
+      _orders: [],
+      _range: null,
       select: () => api,
-      order: () => api,
+      order: (field, options = {}) => {
+        api._orders.push({ field, ascending: options.ascending !== false });
+        return api;
+      },
+      range: (from, to) => {
+        api._range = [from, to];
+        return api;
+      },
       eq: (field, value) => {
         api._filters.push([field, value]);
         return api;
+      },
+      then: resolve => {
+        let data = rows.filter(row => api._filters.every(([field, value]) => String(row[field]) === String(value)));
+        if (api._orders.length) {
+          data = [...data].sort((a, b) => {
+            for (const { field, ascending } of api._orders) {
+              const comparison = a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0;
+              if (comparison) return ascending ? comparison : -comparison;
+            }
+            return 0;
+          });
+        }
+        if (api._range) data = data.slice(api._range[0], api._range[1] + 1);
+        resolve({ data, error: null });
       },
       maybeSingle: async () => {
         let data = rows;
@@ -179,6 +704,7 @@ const makeLocalDb = () => {
             const filtered = rows.filter(row => !deletion.filters.every(([field, value]) => String(row[field]) === String(value)));
             if (table === 'productos') snapshot.productos = filtered;
             if (table === 'vendedores') snapshot.vendedores = Object.fromEntries(filtered.map(row => [row.id, row]));
+            if (table === 'promociones') snapshot.promociones = filtered;
             save(snapshot);
             resolve({ error: null, data: filtered });
           }
@@ -199,6 +725,12 @@ const makeLocalDb = () => {
         if (table === 'reseñas') {
           snapshot.reseñas.unshift({ id: `r-${Date.now()}`, ...record, aprobado: false });
           save(snapshot);
+        }
+        if (table === 'promociones') {
+          const promocion = { id: `promo-${Date.now()}`, ...record, creado_en: new Date().toISOString() };
+          snapshot.promociones.unshift(promocion);
+          save(snapshot);
+          return { error: null, data: promocion };
         }
         return { error: null, data: record };
       },
@@ -300,18 +832,24 @@ const makeLocalDb = () => {
 
 document.head.insertAdjacentHTML('beforeend', '<style>[hidden]{display:none!important}</style>');
 
-const usaSupabase = Boolean(window.supabase && !SUPABASE_URL.includes('TU-PROYECTO'));
+const modoDemo = new URLSearchParams(window.location.search).get('demo') === '1';
+const usaSupabase = Boolean(window.supabase && !SUPABASE_URL.includes('TU-PROYECTO') && !modoDemo);
 const db = usaSupabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : makeLocalDb();
 const URL_REDIRECCION_AUTH = `${window.location.origin}${window.location.pathname}`;
 const retornoConfirmacion = new URLSearchParams(window.location.hash.slice(1));
 let vieneDeConfirmacion = retornoConfirmacion.get('type') === 'signup';
 
 /* ---------- Estado ---------- */
-let productos = [], vendedores = {}, usuario = null, miPerfil = null;
+let productos = [], vendedores = {}, promociones = [], usuario = null, miPerfil = null;
+let catalogoDemoActivo = false;
 let fotosNuevas = [];
 let carruselFotos = [], carruselIndex = 0, detalleEmoji = '🛒';
+let revisandoExpiraciones = false;
+let ultimoErrorCargaDatos = null;
+const erroresExpiracionDestacados = new Map();
 const MAX_FOTOS = 6;
 const estado = { filtro: 'todos', busqueda: '', orden: 'recientes' };
+let ignorarClickCarruselHasta = 0;
 const EMOJI_CAT = {
   Alimentos: '🛒', 'Lácteos': '🧀', 'Panadería': '🥖',
   'Panadería y repostería': '🥖', Carnes: '🥩', 'Frutas y verduras': '🥬',
@@ -345,6 +883,12 @@ const modalPublicar = $('#modal-publicar');
 const modalAdmin = $('#modal-admin');
 const modalDetalle = $('#modal-producto');
 const modalTienda = $('#modal-tienda');
+const modalPromocion = $('#modal-promocion');
+let indicePromocion = 0;
+let intervaloPromociones = null;
+let vencimientoIntervaloPromociones = null;
+let vistaPreviaPromocionUrl = null;
+let scrollDetalleOrigen = null;
 $('#publicar-contenedor').append($('#seccion-publicar'));
 const frasesPorHorario = {
   mañana: [
@@ -372,23 +916,41 @@ let intervaloTestimonios = null;
 async function cargarDatos() {
   try {
     $('#conteo-productos').textContent = 'Cargando productos…';
-    const [p, v] = await Promise.all([
-      db.from('productos').select('*').order('creado_en', { ascending: false }),
-      db.from('vendedores').select('*')
+    const [productosCargados, vendedoresCargados] = await Promise.all([
+      leerTablaCompleta('productos', [['creado_en', false], ['id', true]]),
+      leerTablaCompleta('vendedores', [['id', true]])
     ]);
-    if (p.error || v.error) throw new Error(p.error?.message || v.error?.message || 'No se pudieron cargar los datos.');
+    ultimoErrorCargaDatos = null;
     const local = readLocalState();
-    productos = (p.data || []).filter(producto => !esDatoDemo(producto)).map(producto => {
+    const productosRemotos = productosCargados.filter(producto => !usaSupabase || !esDatoDemo(producto));
+    const vendedoresRemotos = vendedoresCargados.filter(vendedor => !usaSupabase || !esDatoDemo(vendedor));
+    const productosDemo = local.productos.filter(esDatoDemo);
+    const vendedoresDemo = Object.values(local.vendedores).filter(esDatoDemo);
+    catalogoDemoActivo = modoDemo || productosDemo.length > 0;
+    const productosReales = productosRemotos.map(producto => {
       const localProducto = local.productos.find(item => item.id === producto.id);
       return {
         ...producto,
         ...(localProducto && !Array.isArray(producto.tags) ? { tags: localProducto.tags } : {})
       };
     });
-    vendedores = Object.fromEntries((v.data || []).filter(vendedor => !esDatoDemo(vendedor)).map(x => [x.id, {
-      ...x,
-      ...(local.vendedores[x.id] || {})
-    }]));
+    productos = [...productosDemo, ...productosReales];
+    vendedores = {
+      ...Object.fromEntries(vendedoresDemo.map(vendedor => [vendedor.id, vendedor])),
+      ...Object.fromEntries(vendedoresRemotos.map(vendedor => [vendedor.id, {
+        ...vendedor,
+        ...(local.vendedores[vendedor.id] || {})
+      }]))
+    };
+    await cargarPromociones();
+    const idsDestacadosVencidos = new Set([
+      ...productos.filter(producto => producto.destacado && !destacadoVigente(producto)).map(producto => producto.id),
+      ...Object.values(vendedores).filter(tienda => tienda.destacado && !destacadoVigente(tienda)).map(tienda => tienda.id)
+    ]);
+    erroresExpiracionDestacados.forEach((_, id) => {
+      if (!idsDestacadosVencidos.has(id)) erroresExpiracionDestacados.delete(id);
+    });
+    $('#aviso-catalogo-demo').hidden = !productos.some(esDatoDemo);
     await limpiarDestacadosVencidos();
     pintarVitrina();
     pintarVendedores();
@@ -396,9 +958,13 @@ async function cargarDatos() {
     $('[data-reintentar]').hidden = true;
     if (usuario) pintarMisProductos();
   } catch (error) {
+    ultimoErrorCargaDatos = error.message;
     const local = readLocalState();
-    productos = (local.productos || []).filter(producto => !esDatoDemo(producto));
-    vendedores = Object.fromEntries(Object.values(local.vendedores || {}).filter(vendedor => !esDatoDemo(vendedor)).map(vendedor => [vendedor.id, vendedor]));
+    productos = local.productos || [];
+    vendedores = local.vendedores || {};
+    promociones = local.promociones || [];
+    pintarPromociones();
+    $('#aviso-catalogo-demo').hidden = !productos.some(esDatoDemo);
     pintarVitrina();
     pintarVendedores();
     pintarMetricas();
@@ -409,6 +975,141 @@ async function cargarDatos() {
     console.error('Error al cargar la vitrina:', error);
   }
 }
+
+async function cargarPromociones() {
+  const aviso = $('#aviso-promociones');
+  try {
+    if (modoDemo || !usaSupabase) {
+      const state = readLocalState();
+      const vencidas = new Set(state.promociones
+        .filter(promocion => promocion.estado === 'aprobada' && new Date(promocion.vence_en).getTime() <= Date.now())
+        .map(promocion => promocion.id));
+      if (vencidas.size) {
+        state.promociones = state.promociones.filter(promocion => !vencidas.has(promocion.id));
+        writeLocalState(state);
+      }
+      promociones = state.promociones;
+    } else {
+      const { data, error } = await db.from('promociones').select('*').order('creado_en', { ascending: false });
+      if (error) throw error;
+      promociones = data?.length || !catalogoDemoActivo
+        ? (data || [])
+        : readLocalState().promociones.filter(esDatoDemo);
+    }
+    aviso.hidden = true;
+    aviso.textContent = '';
+  } catch (error) {
+    promociones = modoDemo || !usaSupabase || catalogoDemoActivo
+      ? readLocalState().promociones
+      : [];
+    aviso.hidden = false;
+    aviso.textContent = 'No se pudieron cargar las promociones compartidas. Verifica que la tabla promociones esté creada en Supabase y vuelve a intentarlo.';
+    aviso.classList.add('promocion-aviso--error');
+    console.error('Error al cargar promociones:', error);
+  }
+  indicePromocion = promocionesVisibles().length ? indicePromocion % promocionesVisibles().length : 0;
+  pintarPromociones();
+}
+
+function promocionesVisibles() {
+  return promociones.filter(promocion =>
+    promocion.estado === 'aprobada' && new Date(promocion.vence_en).getTime() > Date.now()
+  );
+}
+
+function pintarPromociones() {
+  const contenedor = $('#promocion-carrusel');
+  if (!contenedor) return;
+  const visibles = promocionesVisibles();
+  const promocion = visibles[indicePromocion];
+  if (!promocion) {
+    contenedor.innerHTML = '<div class="promocion-vacia"><span aria-hidden="true">✨</span><div><strong>Pronto habrá nuevas promociones</strong><p>Vuelve a visitar la vitrina para descubrir ofertas de temporada.</p></div></div>';
+    return;
+  }
+  const vendedor = vendedores[promocion.vendedor_id] || {};
+  const foto = urlImagen(promocion.imagen_url);
+  const whatsapp = soloDigitos(vendedor.whatsapp);
+  const demo = esDatoDemo(promocion);
+  const mensaje = encodeURIComponent(`Hola, vi tu promoción "${promocion.titulo}" en Cerca de ti. ¿Me das más información?`);
+  const contacto = whatsapp
+    ? (demo
+      ? '<span class="boton boton--verde promocion-contacto promocion-contacto--demo" aria-disabled="true" title="Este contacto pertenece a un ejemplo">WhatsApp de ejemplo · sin contacto</span>'
+      : `<a class="boton boton--verde promocion-contacto" href="https://wa.me/${whatsapp}?text=${mensaje}" target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>`)
+    : `<span class="promocion-demo-nota">Contacta con la tienda para conocer disponibilidad</span>`;
+  contenedor.innerHTML = `
+    <article class="promocion-card${demo ? ' promocion-card--demo' : ''}">
+      <div class="promocion-foto">${foto ? `<img src="${esc(foto)}" alt="${esc(promocion.titulo)}" loading="lazy">` : '<span aria-hidden="true">🌟</span>'}</div>
+      <div class="promocion-contenido">
+        <div class="promocion-etiquetas"><span>OFERTA DE TEMPORADA</span>${demo ? '<span class="promocion-demo-badge">EJEMPLO</span>' : ''}</div>
+        <h3>${esc(promocion.titulo)}</h3>
+        <p>${esc(promocion.descripcion)}</p>
+        <div class="promocion-pie">
+          <span class="promocion-tienda">${esc(vendedor.negocio || 'Vendedor local')}</span>
+          ${contacto}
+        </div>
+      </div>
+      <div class="promocion-contador" data-promo-countdown="${esc(promocion.id)}" aria-label="Tiempo restante"></div>
+    </article>
+    ${visibles.length > 1 ? `<div class="promocion-controles">
+      <button type="button" data-promo-direccion="-1" aria-label="Promoción anterior">←</button>
+      <span>${indicePromocion + 1} / ${visibles.length}</span>
+      <button type="button" data-promo-direccion="1" aria-label="Siguiente promoción">→</button>
+    </div>` : ''}
+  `;
+  actualizarContadorPromocion();
+  if (!vencimientoIntervaloPromociones) vencimientoIntervaloPromociones = setInterval(actualizarContadorPromocion, 1000);
+  if (!intervaloPromociones) {
+    intervaloPromociones = setInterval(() => {
+      const cantidad = promocionesVisibles().length;
+      if (cantidad > 1) {
+        indicePromocion = (indicePromocion + 1) % cantidad;
+        pintarPromociones();
+      }
+    }, 5 * 60 * 1000);
+  }
+}
+
+function actualizarContadorPromocion() {
+  const vencidas = promociones.filter(promocion =>
+    promocion.estado === 'aprobada' && new Date(promocion.vence_en).getTime() <= Date.now()
+  );
+  if (vencidas.length) {
+    promociones = promociones.filter(promocion => !vencidas.includes(promocion));
+    indicePromocion = promocionesVisibles().length ? indicePromocion % promocionesVisibles().length : 0;
+    if (modoDemo || !usaSupabase) {
+      const state = readLocalState();
+      const idsVencidas = new Set(vencidas.map(promocion => promocion.id));
+      state.promociones = state.promociones.filter(promocion => !idsVencidas.has(promocion.id));
+      writeLocalState(state);
+    }
+    pintarPromociones();
+    if (modalAdmin.open) renderAdminPanel();
+    return;
+  }
+  const contador = $('#promocion-carrusel [data-promo-countdown]');
+  if (!contador) return;
+  const promocion = promociones.find(item => item.id === contador.dataset.promoCountdown);
+  if (!promocion) return;
+  const restante = Math.max(0, new Date(promocion.vence_en).getTime() - Date.now());
+  const dias = Math.floor(restante / MILISEGUNDOS_DIA);
+  const horas = Math.floor((restante % MILISEGUNDOS_DIA) / 3600000);
+  const minutos = Math.floor((restante % 3600000) / 60000);
+  const segundos = Math.floor((restante % 60000) / 1000);
+  contador.innerHTML = `<span>TIEMPO RESTANTE</span><div class="promocion-tiempo-unidades">
+    <strong><b>${dias}</b><small>días</small></strong>
+    <strong><b>${String(horas).padStart(2, '0')}</b><small>horas</small></strong>
+    <strong><b>${String(minutos).padStart(2, '0')}</b><small>min</small></strong>
+    <strong><b>${String(segundos).padStart(2, '0')}</b><small>seg</small></strong>
+  </div>`;
+}
+
+listaProductos.addEventListener('click', e => {
+  const control = e.target.closest('[data-promo-direccion]');
+  const cantidad = promocionesVisibles().length;
+  if (!control || cantidad < 2) return;
+  indicePromocion = (indicePromocion + Number(control.dataset.promoDireccion) + cantidad) % cantidad;
+  pintarPromociones();
+});
 
 async function limpiarDestacadosVencidos() {
   const vencidos = productos.filter(p => p.destacado && !destacadoVigente(p));
@@ -434,79 +1135,154 @@ async function limpiarDestacadosVencidos() {
     }
   });
   writeLocalState(local);
-  await Promise.all([
-    ...vencidos.map(producto => guardarDestacado('productos', producto.id, false, null)),
-    ...tiendasVencidas.map(tienda => guardarDestacado('vendedores', tienda.id, false, null))
-  ]);
+  const pendientes = [
+    ...vencidos.map(producto => ['productos', producto.id]),
+    ...tiendasVencidas.map(tienda => ['vendedores', tienda.id])
+  ];
+  await Promise.all(pendientes.map(async ([tabla, id]) => {
+    try {
+      await guardarDestacado(tabla, id, false, null);
+      erroresExpiracionDestacados.delete(id);
+    } catch (error) {
+      erroresExpiracionDestacados.set(id, error.message);
+      console.error(`El destacado vencido ${id} ya no se muestra, pero falta sincronizar su expiración:`, error);
+    }
+  }));
   return true;
 }
 
 async function revisarExpiraciones() {
+  if (revisandoExpiraciones) return;
+  revisandoExpiraciones = true;
   try {
+    const cambioDescuento = limpiarDescuentosVencidos();
     const cambio = await limpiarDestacadosVencidos();
-    if (!cambio) return;
+    if (!cambio && !cambioDescuento) return;
     pintarVitrina();
     pintarVendedores();
+    if (usuario) pintarMisProductos();
     if (modalAdmin.open) renderAdminPanel();
   } catch (error) {
-    console.error('No se pudieron actualizar los destacados vencidos:', error);
+    console.error('No se pudieron revisar los destacados vencidos:', error);
+  } finally {
+    revisandoExpiraciones = false;
   }
+}
+
+function limpiarDescuentosVencidos() {
+  const ahora = Date.now();
+  const vencidos = productos.filter(producto =>
+    Number(producto.descuento_porcentaje) > 0
+    && producto.descuento_hasta
+    && new Date(producto.descuento_hasta).getTime() <= ahora
+  );
+  if (!vencidos.length) return false;
+  const ids = new Set(vencidos.map(producto => producto.id));
+  vencidos.forEach(producto => {
+    producto.descuento_porcentaje = 0;
+    producto.descuento_hasta = null;
+  });
+  if (!usaSupabase) {
+    const state = readLocalState();
+    state.productos.forEach(producto => {
+      if (ids.has(producto.id)) {
+        producto.descuento_porcentaje = 0;
+        producto.descuento_hasta = null;
+      }
+    });
+    writeLocalState(state);
+  }
+  return true;
 }
 
 /* ---------- Tarjeta de producto ---------- */
 function tarjetaProducto(p) {
   const v = vendedores[p.vendedor_id] || {};
-  const fotos = Array.isArray(p.fotos) ? p.fotos : [];
-  const img = fotos.length
-    ? `<img src="${esc(urlImagen(fotos[0]))}" alt="${esc(p.nombre)}" loading="lazy">`
+  const fotos = (Array.isArray(p.fotos) ? p.fotos : []).map(urlImagen).filter(Boolean);
+  const imagen = fotos.length
+    ? `<img data-producto-foto src="${esc(fotos[0])}" alt="${esc(p.nombre)}" loading="lazy">`
     : `<span class="producto-emoji" aria-hidden="true">${p.emoji || EMOJI_CAT[p.categoria] || '🛒'}</span>`;
-  const badgeFotos = fotos.length ? `<span class="producto-fotos">📷 ${fotos.length}</span>` : '';
-  const etiquetas = etiquetasProducto(p);
-  const etiquetasHtml = etiquetas.length
-    ? `<div class="producto-tags" aria-label="Etiquetas del producto">${etiquetas.map(tag => `<span>${esc(tag)}</span>`).join('')}</div>`
+  const controlesCarrusel = fotos.length > 1
+    ? `<button type="button" class="producto-carrusel-control producto-carrusel-anterior" data-producto-slide="${esc(p.id)}" data-direccion="-1" aria-label="Foto anterior de ${esc(p.nombre)}">‹</button>
+      <span class="producto-carrusel-contador" data-producto-contador="${esc(p.id)}" aria-live="polite">1 / ${fotos.length}</span>
+      <button type="button" class="producto-carrusel-control producto-carrusel-siguiente" data-producto-slide="${esc(p.id)}" data-direccion="1" aria-label="Siguiente foto de ${esc(p.nombre)}">›</button>`
     : '';
-  const destacado = destacadoVigente(p) ? '<span class="vendedor-destacado" title="Producto destacado" aria-label="Producto destacado">★</span>' : '';
+  const badgeFotos = fotos.length ? `<span class="producto-fotos">📷 ${fotos.length}</span>` : '';
   const destacadoActivo = destacadoVigente(p);
-  return `<article class="producto ${destacadoActivo ? 'producto--destacado' : ''}" data-id="${p.id}" data-categoria="${categoriaFiltro(p.categoria)}" tabindex="0" role="button" aria-label="Ver ${esc(p.nombre)}">
-    ${destacado}
+  const categoria = categoriaFiltro(p.categoria);
+  const ofertaActiva = descuentoVigente(p);
+  return `<article class="producto ${destacadoActivo ? 'producto--destacado' : ''}${ofertaActiva ? ' producto--oferta' : ''}" data-id="${esc(p.id)}" data-categoria="${categoria}" data-fotos="${esc(JSON.stringify(fotos))}" data-foto-actual="0" tabindex="0" role="group" aria-label="${esc(p.nombre)}, S/ ${fmtPrecio(precioConDescuento(p))}${ofertaActiva ? `, ${p.descuento_porcentaje}% de descuento` : ''}, de ${esc(v.negocio || 'Vendedor local')}${destacadoActivo ? ', producto destacado' : ''}. Presiona Enter para ver detalles">
     <div class="producto-imagen">
       <span class="producto-etiqueta">${esc(p.categoria || 'Varios')}</span>
-      ${badgeFotos}${img}
+      ${destacadoActivo ? '<span class="producto-sello-destacado"><span aria-hidden="true">★</span> Destacado</span>' : ''}
+      ${ofertaActiva ? `<span class="producto-sello-oferta" aria-label="Descuento del ${Number(p.descuento_porcentaje)} por ciento"><strong>-${Number(p.descuento_porcentaje)}%</strong><small>OFERTA</small></span>` : ''}
+      ${badgeFotos}${imagen}${controlesCarrusel}
     </div>
     <div class="producto-cuerpo">
       <h3>${esc(p.nombre)}</h3>
-      ${p.detalle ? `<p class="producto-detalle">${esc(p.detalle)}</p>` : ''}
-      ${etiquetasHtml}
-      <button type="button" class="producto-vendedor" data-tienda="${p.vendedor_id}">🏪 ${esc(v.negocio || 'Vendedor local')}</button>
-      <div class="producto-pie">
-        <span class="producto-precio">S/ ${fmtPrecio(p.precio)}</span>
-        <button type="button" class="boton-wsp" data-pedir="${p.id}">
-          <svg class="icono"><use href="#i-whatsapp"/></svg>
-          <span>Pedir</span>
-        </button>
-      </div>
+      ${vistaPrecioProducto(p)}
+      <span class="producto-vendedor">🏪 ${esc(v.negocio || 'Vendedor local')}</span>
     </div>
   </article>`;
 }
 
+function cambiarFotoTarjeta(boton) {
+  const tarjeta = boton.closest('.producto[data-id]');
+  if (!tarjeta || tarjeta.dataset.id !== boton.dataset.productoSlide) return;
+  let fotos;
+  try {
+    fotos = JSON.parse(tarjeta.dataset.fotos || '[]');
+  } catch (error) {
+    console.error('No se pudieron leer las fotos del producto:', error);
+    return;
+  }
+  if (!Array.isArray(fotos) || fotos.length < 2) return;
+  const direccion = Number(boton.dataset.direccion);
+  const indice = (Number(tarjeta.dataset.fotoActual) + direccion + fotos.length) % fotos.length;
+  tarjeta.dataset.fotoActual = String(indice);
+  const imagen = $('[data-producto-foto]', tarjeta);
+  if (imagen) {
+    imagen.classList.remove('producto-foto-entrada--siguiente', 'producto-foto-entrada--anterior');
+    void imagen.offsetWidth;
+    imagen.src = fotos[indice];
+    imagen.classList.add(direccion > 0 ? 'producto-foto-entrada--siguiente' : 'producto-foto-entrada--anterior');
+  }
+  const contador = $('[data-producto-contador]', tarjeta);
+  if (contador) contador.textContent = `${indice + 1} / ${fotos.length}`;
+}
+
 /* ---------- Vitrina principal ---------- */
 function pintarVitrina() {
-  const q = normalizar(estado.busqueda.trim());
+  const terminos = palabrasBusqueda(estado.busqueda.trim());
   const lista = productos.filter(p => {
     const v = vendedores[p.vendedor_id] || {};
-    const tags = etiquetasProducto(p).map(t => normalizar(t)).join(' ');
     const porFiltro = estado.filtro === 'todos' || categoriaFiltro(p.categoria) === estado.filtro;
-    const texto = normalizar(`${p.nombre} ${p.detalle || ''} ${p.categoria || ''} ${v.negocio || ''} ${tags}`);
-    return porFiltro && (!q || texto.includes(q));
+    const palabras = palabrasBusqueda(`${p.nombre} ${p.detalle || ''} ${p.categoria || ''} ${v.negocio || ''} ${etiquetasProducto(p).join(' ')}`);
+    return porFiltro && terminos.every(termino => coincideBusqueda(termino, palabras));
   });
   const ord = {
     'recientes': (a, b) => new Date(b.creado_en) - new Date(a.creado_en),
-    'precio-asc': (a, b) => a.precio - b.precio,
-    'precio-desc': (a, b) => b.precio - a.precio,
+    'precio-asc': (a, b) => precioConDescuento(a) - precioConDescuento(b),
+    'precio-desc': (a, b) => precioConDescuento(b) - precioConDescuento(a),
     'nombre': (a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es')
   }[estado.orden];
-  lista.sort((a, b) => Number(destacadoVigente(b)) - Number(destacadoVigente(a)) || ord(a, b));
-  listaProductos.innerHTML = lista.map(tarjetaProducto).join('');
+  const interacciones = leerContadoresLocales(INTERACCIONES_PRODUCTO_KEY);
+  const popularidad = estado.orden === 'recientes'
+    ? (a, b) => puntuacionInteraccionProducto(b, interacciones) - puntuacionInteraccionProducto(a, interacciones)
+    : () => 0;
+  lista.sort((a, b) => Number(destacadoVigente(b)) - Number(destacadoVigente(a)) || popularidad(a, b) || ord(a, b));
+  const tarjetas = lista.map(tarjetaProducto);
+  if (tarjetas.length > 1 && promocionesVisibles().length) {
+    const posicionPromocion = Math.ceil(tarjetas.length / 2);
+    tarjetas.splice(posicionPromocion, 0, '<div class="promocion-grid-item"><div class="promocion-grid-etiqueta">Ofertas especiales de temporada</div><div class="promocion-carrusel" id="promocion-carrusel" role="region" aria-label="Promociones aprobadas"></div></div>');
+  }
+  listaProductos.innerHTML = tarjetas.join('');
+  pintarPromociones();
+  const idsProductos = new Set(productos.map(producto => producto.id));
+  const interaccionesVigentes = Object.fromEntries(Object.entries(interacciones).filter(([id]) => idsProductos.has(id)));
+  if (Object.keys(interaccionesVigentes).length !== Object.keys(interacciones).length) {
+    localStorage.setItem(INTERACCIONES_PRODUCTO_KEY, JSON.stringify(interaccionesVigentes));
+  }
   conteo.textContent = lista.length === 1
     ? '1 producto disponible, recién salido.'
     : `${lista.length} productos disponibles, recién salidos.`;
@@ -522,8 +1298,9 @@ function pintarVendedores() {
     const av = urlImagen(v.avatar_url) ? `<img src="${esc(urlImagen(v.avatar_url))}" alt="">` : esc(v.avatar_emoji || iniciales(v.negocio));
     const num = soloDigitos(v.whatsapp);
     const destacado = destacadoVigente(v);
-    return `<article class="vendedor${destacado ? ' vendedor--destacado' : ''}">
-      ${destacado ? '<span class="vendedor-destacado" title="Vendedor destacado" aria-label="Vendedor destacado">★</span>' : ''}
+    const esDemo = esDatoDemo(v);
+    return `<article class="vendedor${destacado ? ' vendedor--destacado' : ''}" data-categoria="${categoriaFiltro(v.categoria)}">
+      ${destacado ? '<span class="vendedor-sello-destacado"><span aria-hidden="true">★</span> Tienda destacada</span>' : ''}
       <span class="vendedor-avatar" aria-hidden="true">${av}</span>
       <div class="vendedor-datos">
         <h3>${esc(v.negocio)}</h3>
@@ -533,9 +1310,11 @@ function pintarVendedores() {
       </div>
       <div class="vendedor-acciones">
         <button type="button" class="boton boton--linea" data-tienda="${v.id}">Ver tienda</button>
-        <a class="boton-wsp" target="_blank" rel="noopener" aria-label="Escribir a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en DE NUESTRA TIERRA.`)}">
-          <svg class="icono"><use href="#i-whatsapp"/></svg>
-        </a>
+        ${esDemo
+          ? '<span class="vendedor-demo-etiqueta">Ejemplo</span>'
+          : `<a class="boton-wsp" target="_blank" rel="noopener" aria-label="Escribir a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}">
+              <svg class="icono"><use href="#i-whatsapp"/></svg>
+            </a>`}
       </div>
     </article>`;
   }).join('') || '<p class="producto-detalle">Aún no hay tiendas registradas. ¡Sé la primera! 🌿</p>';
@@ -551,13 +1330,21 @@ function pintarMetricas() {
 /* ---------- Interacción con tarjetas ---------- */
 function abrirWhatsAppProducto(id) {
   const p = productos.find(x => x.id === id); if (!p) return;
+  if (esDatoDemo(p)) return;
+  registrarInteraccionProducto(id, 'whatsapp');
+  pintarVitrina();
   const v = vendedores[p.vendedor_id] || {};
   const num = soloDigitos(v.whatsapp);
-  const msg = encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en DE NUESTRA TIERRA y quiero hacer un pedido.`);
+  const msg = encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en Cerca de ti y quiero hacer un pedido.`);
   window.open(`https://wa.me/${num}?text=${msg}`, '_blank', 'noopener');
 }
 
 document.addEventListener('click', e => {
+  const contactarProducto = e.target.closest('[data-contactar-producto]');
+  if (contactarProducto && !contactarProducto.hasAttribute('aria-disabled')) {
+    registrarInteraccionProducto(contactarProducto.dataset.contactarProducto, 'whatsapp');
+    pintarVitrina();
+  }
   const pedir = e.target.closest('[data-pedir]');
   if (pedir) { abrirWhatsAppProducto(pedir.dataset.pedir); return; }
   const tienda = e.target.closest('[data-tienda]');
@@ -566,9 +1353,40 @@ document.addEventListener('click', e => {
 
 [listaProductos, tiendaProductos].forEach(grid => {
   grid.addEventListener('click', e => {
+    const controlCarrusel = e.target.closest('[data-producto-slide]');
+    if (controlCarrusel) {
+      e.preventDefault();
+      e.stopPropagation();
+      cambiarFotoTarjeta(controlCarrusel);
+      return;
+    }
+    if (Date.now() < ignorarClickCarruselHasta) return;
     const card = e.target.closest('.producto');
     if (!card || e.target.closest('[data-tienda],[data-pedir]')) return;
     abrirDetalle(card.dataset.id);
+  });
+  grid.addEventListener('pointerdown', e => {
+    const imagen = e.target.closest('.producto-imagen');
+    if (imagen && e.isPrimary) {
+      imagen.dataset.inicioX = String(e.clientX);
+      imagen.dataset.inicioY = String(e.clientY);
+    }
+  });
+  grid.addEventListener('pointerup', e => {
+    const imagen = e.target.closest('.producto-imagen');
+    if (!imagen || imagen.dataset.inicioX === undefined || !e.isPrimary) return;
+    const deltaX = e.clientX - Number(imagen.dataset.inicioX);
+    const deltaY = e.clientY - Number(imagen.dataset.inicioY);
+    delete imagen.dataset.inicioX;
+    delete imagen.dataset.inicioY;
+    if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    const tarjeta = imagen.closest('.producto');
+    const direccion = deltaX < 0 ? 1 : -1;
+    const boton = $(`[data-producto-slide][data-direccion="${direccion}"]`, tarjeta);
+    if (boton) {
+      cambiarFotoTarjeta(boton);
+      ignorarClickCarruselHasta = Date.now() + 500;
+    }
   });
   grid.addEventListener('keydown', e => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('producto')) {
@@ -580,15 +1398,30 @@ document.addEventListener('click', e => {
 /* ---------- Detalle de producto + carrusel ---------- */
 function abrirDetalle(id) {
   const p = productos.find(x => x.id === id); if (!p) return;
+  registrarInteraccionProducto(id, 'detalle');
+  scrollDetalleOrigen = window.scrollY;
   const v = vendedores[p.vendedor_id] || {};
   $('#detalle-categoria').textContent = p.categoria || 'Varios';
   $('#detalle-nombre').textContent = p.nombre;
   $('#detalle-detalle').textContent = p.detalle || 'Escríbele al vendedor por WhatsApp para más detalles.';
-  $('#detalle-precio').textContent = `S/ ${fmtPrecio(p.precio)}`;
+  $('#detalle-precio').innerHTML = vistaPrecioProducto(p, 'detalle-precio-valor');
   const tags = etiquetasProducto(p).length ? ` · ${etiquetasProducto(p).join(', ')}` : '';
   $('#detalle-detalle').textContent = `${p.detalle || 'Escríbele al vendedor por WhatsApp para más detalles.'}${tags}`;
+  const contactoWhatsApp = $('#detalle-wsp');
+  const esDemo = esDatoDemo(p);
+  contactoWhatsApp.hidden = false;
+  contactoWhatsApp.toggleAttribute('aria-disabled', esDemo);
+  contactoWhatsApp.classList.toggle('detalle-wsp--demo', esDemo);
+  contactoWhatsApp.innerHTML = esDemo
+    ? 'WhatsApp no disponible en ejemplo'
+    : '<svg class="icono"><use href="#i-whatsapp"/></svg> Contactar por WhatsApp';
+  contactoWhatsApp.onclick = esDemo ? e => e.preventDefault() : null;
+  contactoWhatsApp.tabIndex = esDemo ? -1 : 0;
   const num = soloDigitos(v.whatsapp);
-  $('#detalle-wsp').href = `https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en DE NUESTRA TIERRA y quiero hacer un pedido.`)}`;
+  contactoWhatsApp.href = esDemo
+    ? '#'
+    : `https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en Cerca de ti y quiero hacer un pedido.`)}`;
+  contactoWhatsApp.dataset.contactarProducto = p.id;
   $('#detalle-vendedor-avatar').innerHTML = urlImagen(v.avatar_url) ? `<img src="${esc(urlImagen(v.avatar_url))}" alt="">` : esc(v.avatar_emoji || '🏪');
   $('#detalle-vendedor-nombre').textContent = v.negocio || 'Vendedor local';
   $('#detalle-vendedor').dataset.tienda = p.vendedor_id;
@@ -597,7 +1430,19 @@ function abrirDetalle(id) {
   detalleEmoji = p.emoji || EMOJI_CAT[p.categoria] || '🛒';
   pintarCarrusel();
   modalDetalle.showModal();
+  restaurarScrollDetalle();
 }
+
+function restaurarScrollDetalle() {
+  if (scrollDetalleOrigen === null) return;
+  window.scrollTo({ left: 0, top: scrollDetalleOrigen, behavior: 'instant' });
+}
+
+modalDetalle.addEventListener('close', () => {
+  restaurarScrollDetalle();
+  scrollDetalleOrigen = null;
+  pintarVitrina();
+});
 
 function pintarCarrusel() {
   const pista = $('#carrusel-pista'), puntos = $('#carrusel-puntos');
@@ -653,33 +1498,75 @@ function abrirTienda(id) {
   $('#tienda-direccion').textContent = v.direccion ? `📍 ${v.direccion}` : '📍 San Marcos, Cajamarca';
   $('#tienda-descripcion').textContent = v.descripcion || 'Este vendedor aún no agregó una descripción.';
   $('#tienda-categoria').textContent = v.categoria || 'Varios';
+  $('#tienda-wsp').hidden = esDatoDemo(v);
   const deTienda = productos.filter(p => p.vendedor_id === id).sort((a, b) => Number(destacadoVigente(b)) - Number(destacadoVigente(a)) || new Date(b.creado_en || 0) - new Date(a.creado_en || 0));
   $('#tienda-conteo').textContent = `${deTienda.length} producto(s) en vitrina`;
-  $('#tienda-wsp').href = `https://wa.me/${soloDigitos(v.whatsapp)}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en DE NUESTRA TIERRA.`)}`;
+  $('#tienda-wsp').href = `https://wa.me/${soloDigitos(v.whatsapp)}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}`;
   tiendaProductos.innerHTML = deTienda.map(tarjetaProducto).join('') || '<p class="producto-detalle">Aún no hay productos publicados.</p>';
   if (!modalTienda.open) modalTienda.showModal();
 }
 
 /* ---------- Filtros, búsqueda y orden ---------- */
 const chips = $$('.chip[data-filtro]');
-chips.forEach(chip => chip.addEventListener('click', () => {
-  estado.filtro = chip.dataset.filtro;
-  chips.forEach(c => { const a = c === chip; c.classList.toggle('chip--activo', a); c.setAttribute('aria-pressed', a); });
+const categoriaCards = $$('.categoria-tarjeta[data-filtro]');
+const aplicarFiltro = (filtro) => {
+  estado.filtro = filtro;
+  chips.forEach(c => { const activo = c.dataset.filtro === filtro; c.classList.toggle('chip--activo', activo); c.setAttribute('aria-pressed', String(activo)); });
+  categoriaCards.forEach(c => {
+    const activo = c.dataset.filtro === filtro;
+    c.classList.toggle('categoria-tarjeta--active', activo);
+    c.setAttribute('aria-pressed', String(activo));
+  });
   pintarVitrina();
+};
+chips.forEach(chip => chip.addEventListener('click', () => aplicarFiltro(chip.dataset.filtro)));
+categoriaCards.forEach(card => card.addEventListener('click', () => {
+  aplicarFiltro(card.dataset.filtro);
+  $('#productos').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }));
+$('[data-ver-todas-categorias]').addEventListener('click', e => {
+  e.preventDefault();
+  aplicarFiltro('todos');
+  $('#productos').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
-buscador.addEventListener('input', espera(() => { estado.busqueda = buscador.value; pintarVitrina(); }));
-$('#form-busqueda').addEventListener('submit', e => { e.preventDefault(); estado.busqueda = buscador.value; pintarVitrina(); });
+const ejecutarBusqueda = (valor, desplazar = false) => {
+  estado.busqueda = valor;
+  if (valor.trim() && estado.filtro !== 'todos') aplicarFiltro('todos');
+  else pintarVitrina();
+  if (desplazar) $('#productos').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+buscador.addEventListener('input', espera(() => ejecutarBusqueda(buscador.value)));
+$('#busquedas-populares').addEventListener('click', e => {
+  const boton = e.target.closest('[data-busqueda-popular]');
+  if (!boton) return;
+  const consulta = boton.dataset.busquedaPopular;
+  buscador.value = consulta;
+  registrarBusquedaPopular(consulta);
+  ejecutarBusqueda(consulta, true);
+});
+$('#form-busqueda').addEventListener('submit', e => {
+  e.preventDefault();
+  registrarBusquedaPopular(buscador.value);
+  ejecutarBusqueda(buscador.value, true);
+});
 $('[data-reintentar]').addEventListener('click', () => { $('[data-reintentar]').hidden = true; cargarDatos(); });
 $$('[data-buscar]').forEach(a => a.addEventListener('click', e => {
-  e.preventDefault(); buscador.value = a.dataset.buscar; estado.busqueda = a.dataset.buscar;
-  pintarVitrina(); $('#productos').scrollIntoView({ behavior: 'smooth' });
+  e.preventDefault();
+  registrarBusquedaPopular(a.dataset.buscar);
+  buscador.value = a.dataset.buscar;
+  ejecutarBusqueda(a.dataset.buscar, true);
 }));
+ pintarBusquedasPopulares();
 $('#ordenar').addEventListener('change', e => { estado.orden = e.target.value; pintarVitrina(); });
 $('[data-limpiar-filtros]').addEventListener('click', () => {
   estado.filtro = 'todos'; estado.busqueda = ''; buscador.value = '';
-  chips.forEach(c => { const t = c.dataset.filtro === 'todos'; c.classList.toggle('chip--activo', t); c.setAttribute('aria-pressed', t); });
-  pintarVitrina();
+  chips.forEach(c => { const t = c.dataset.filtro === 'todos'; c.classList.toggle('chip--activo', t); c.setAttribute('aria-pressed', String(t)); });
+categoriaCards.forEach(c => {
+  c.classList.remove('categoria-tarjeta--active');
+  c.setAttribute('aria-pressed', 'false');
+});
+pintarVitrina();
 });
 
 /* ---------- Menú móvil ---------- */
@@ -708,7 +1595,7 @@ async function completarPerfilTrasConfirmacion() {
     responsable: metadata.responsable || '',
     whatsapp: metadata.whatsapp || '',
     categoria: metadata.categoria || 'Otro',
-    descripcion: 'Tienda creada desde DE NUESTRA TIERRA.'
+    descripcion: 'Tienda creada desde Cerca de ti.'
   });
   if (error) throw error;
   await cargarPerfil();
@@ -867,7 +1754,7 @@ $('#form-crear').addEventListener('submit', async e => {
       responsable,
       whatsapp: soloDigitos($('#c-whats').value),
       categoria: $('#c-categoria').value,
-      descripcion: 'Tienda creada desde DE NUESTRA TIERRA.'
+      descripcion: 'Tienda creada desde Cerca de ti.'
     });
     await cargarPerfil(); pintarZonaUsuario();
     modalAuth.close(); e.target.reset();
@@ -897,6 +1784,136 @@ async function subirFoto(blob, ruta) {
   if (error) throw error;
   return db.storage.from('fotos').getPublicUrl(ruta).data.publicUrl;
 }
+
+function abrirFormularioPromocion() {
+  if (!usuario) return abrirAuth('entrar');
+  if (usuario.email === ADMIN_EMAIL) return abrirAdmin();
+  if (!miPerfil) return abrirPanel();
+  const selector = $('#promo-producto');
+  const propios = productos.filter(producto => producto.vendedor_id === usuario.id);
+  selector.innerHTML = '<option value="">Promoción personalizada</option>' + propios.map(producto =>
+    `<option value="${esc(producto.id)}">${esc(producto.nombre)}</option>`
+  ).join('');
+  if (vistaPreviaPromocionUrl) URL.revokeObjectURL(vistaPreviaPromocionUrl);
+  vistaPreviaPromocionUrl = null;
+  $('#form-promocion').reset();
+  $('#promo-dias').value = '7';
+  $('#promo-imagen').value = '';
+  $('#promo-imagen-label').textContent = '📷 Elegir imagen de la promoción';
+  $('#promo-imagen-preview').innerHTML = '';
+  $('#promocion-msg').hidden = true;
+  modalPromocion.showModal();
+}
+
+$('#btn-crear-promocion').addEventListener('click', abrirFormularioPromocion);
+$('#btn-panel-publicar').addEventListener('click', () => {
+  modalPanel.close();
+  abrirPublicador();
+});
+
+$('#promo-producto').addEventListener('change', e => {
+  const producto = productos.find(item => item.id === e.target.value && item.vendedor_id === usuario?.id);
+  if ($('#promo-imagen').files[0]) return;
+  if (!producto) {
+    $('#promo-imagen-preview').innerHTML = '';
+    return;
+  }
+  $('#promo-titulo').value = producto.nombre;
+  $('#promo-descripcion').value = producto.detalle || '';
+  const foto = Array.isArray(producto.fotos) ? urlImagen(producto.fotos[0]) : '';
+  $('#promo-imagen-preview').innerHTML = foto ? `<img src="${esc(foto)}" alt="Imagen del producto seleccionado">` : '';
+});
+
+$('#promo-imagen').addEventListener('change', e => {
+  const archivo = e.target.files[0];
+  if (!archivo) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(archivo.type) || archivo.size > 6 * 1024 * 1024) {
+    e.target.value = '';
+    $('#promo-imagen-preview').innerHTML = '';
+    $('#promocion-msg').hidden = false;
+    $('#promocion-msg').className = 'modal-nota msg-error';
+    $('#promocion-msg').textContent = 'Elige una imagen JPG, PNG o WebP de hasta 6 MB.';
+    return;
+  }
+  $('#promo-imagen-label').textContent = `📷 ${archivo.name}`;
+  if (vistaPreviaPromocionUrl) URL.revokeObjectURL(vistaPreviaPromocionUrl);
+  vistaPreviaPromocionUrl = URL.createObjectURL(archivo);
+  $('#promo-imagen-preview').innerHTML = `<img src="${esc(vistaPreviaPromocionUrl)}" alt="Vista previa de la promoción">`;
+  $('#promocion-msg').hidden = true;
+});
+
+function blobADataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onload = () => typeof lector.result === 'string' ? resolve(lector.result) : reject(new Error('No se pudo preparar la imagen.'));
+    lector.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+    lector.readAsDataURL(blob);
+  });
+}
+
+$('#form-promocion').addEventListener('submit', async e => {
+  e.preventDefault();
+  const boton = $('#btn-enviar-promocion');
+  const msg = $('#promocion-msg');
+  let rutaFotoSubida = null;
+  boton.disabled = true;
+  try {
+    const producto = productos.find(item => item.id === $('#promo-producto').value && item.vendedor_id === usuario?.id);
+    const titulo = $('#promo-titulo').value.trim();
+    const descripcion = $('#promo-descripcion').value.trim();
+    const duracion = Number($('#promo-dias').value);
+    if (titulo.length < 3 || descripcion.length < 10) throw new Error('Escribe un título de al menos 3 caracteres y una descripción de al menos 10.');
+    if (!Number.isInteger(duracion) || duracion < 1 || duracion > 30) throw new Error('La duración debe ser de 1 a 30 días.');
+    const archivo = $('#promo-imagen').files[0];
+    let imagenUrl = producto && Array.isArray(producto.fotos) ? urlImagen(producto.fotos[0]) : '';
+    if (archivo) {
+      const blob = await procesarImagen(archivo, 1400);
+      if (!blob) throw new Error('No se pudo procesar la imagen seleccionada.');
+      if (usaSupabase && !modoDemo) {
+        rutaFotoSubida = `promociones/${usuario.id}/${Date.now()}.jpg`;
+        imagenUrl = await subirFoto(blob, rutaFotoSubida);
+      } else {
+        imagenUrl = await blobADataUrl(blob);
+      }
+    }
+    if (!imagenUrl) throw new Error('Elige una imagen o selecciona un producto que ya tenga foto.');
+    const registro = {
+      vendedor_id: usuario.id,
+      producto_id: producto?.id || null,
+      titulo,
+      descripcion,
+      imagen_url: imagenUrl,
+      duracion_dias: duracion,
+      estado: 'pendiente',
+      vence_en: null
+    };
+    const { error } = await db.from('promociones').insert(registro);
+    if (error) throw error;
+    await cargarPromociones();
+    renderAdminPanel();
+    modalPromocion.close();
+    e.target.reset();
+    $('#promo-imagen-preview').innerHTML = '';
+    if (vistaPreviaPromocionUrl) URL.revokeObjectURL(vistaPreviaPromocionUrl);
+    vistaPreviaPromocionUrl = null;
+    alert('Promoción enviada. Aparecerá en la vitrina cuando administración la apruebe.');
+  } catch (error) {
+    msg.hidden = false;
+    msg.className = 'modal-nota msg-error';
+    msg.textContent = `No se pudo enviar la promoción: ${error.message}`;
+    if (rutaFotoSubida && usaSupabase && !modoDemo) {
+      try {
+        const { error: errorLimpieza } = await db.storage.from('fotos').remove([rutaFotoSubida]);
+        if (errorLimpieza) throw errorLimpieza;
+      } catch (errorLimpieza) {
+        console.error('No se pudo eliminar la imagen de una promoción que no se guardó:', errorLimpieza);
+        msg.textContent += ' Además, no se pudo limpiar la imagen subida; contacta con administración.';
+      }
+    }
+  } finally {
+    boton.disabled = false;
+  }
+});
 
 /* ---------- Panel: abrir y cargar perfil ---------- */
 function abrirPanel() {
@@ -929,14 +1946,47 @@ function abrirPublicador() {
   });
 }
 
+function filtrarRegistrosAdmin(tipo, valor) {
+  const contenedor = tipo === 'tienda' ? $('#admin-tiendas') : $('#admin-productos');
+  const consulta = normalizar(valor.trim());
+  contenedor.querySelectorAll('.admin-item[data-admin-texto]').forEach(item => {
+    item.hidden = Boolean(consulta && !item.dataset.adminTexto.includes(consulta));
+  });
+}
+
+function actualizarAvisoAdmin() {
+  const aviso = $('#admin-aviso');
+  const soloDemo = productos.length > 0 &&
+    productos.every(esDatoDemo) &&
+    Object.values(vendedores).every(esDatoDemo);
+  let mensaje = !usaSupabase || soloDemo
+    ? 'Modo de demostración o local: los cambios se guardan solo en este navegador y no modifican datos compartidos.'
+    : 'Los cambios se guardan en la base de datos y se reflejan en la vitrina pública.';
+  const pendientes = erroresExpiracionDestacados.size;
+  if (pendientes) {
+    mensaje += ` ${pendientes} destacado(s) vencido(s) ya no se muestran, pero no se pudo sincronizar su estado en Supabase. Revisa la conexión, la columna destacado_hasta y los permisos de administración.`;
+  }
+  if (ultimoErrorCargaDatos) {
+    mensaje += ` No se pudieron cargar los datos compartidos: ${ultimoErrorCargaDatos}.`;
+  }
+  aviso.textContent = mensaje;
+  const hayError = pendientes > 0 || Boolean(ultimoErrorCargaDatos);
+  aviso.classList.toggle('admin-aviso--error', hayError);
+  aviso.setAttribute('role', hayError ? 'alert' : 'status');
+}
+
 function renderAdminPanel() {
   const adminResenas = $('#admin-reseñas');
   const adminTiendas = $('#admin-tiendas');
   const adminProductos = $('#admin-productos');
+  const adminPromociones = $('#admin-promociones');
   const adminSolicitudes = $('#admin-solicitudes');
   const state = readLocalState();
-  const tiendasActuales = Object.values(vendedores).filter(v => !esDatoDemo(v));
-  const productosActuales = productos.filter(p => !esDatoDemo(p));
+  const tiendasActuales = Object.values(vendedores);
+  const productosActuales = productos;
+  actualizarAvisoAdmin();
+  $('#admin-tiendas-conteo').textContent = `${tiendasActuales.length} tiendas`;
+  $('#admin-productos-conteo').textContent = `${productosActuales.length} productos`;
 
   const reseñas = state.reseñas || [];
   adminResenas.innerHTML = reseñas.length
@@ -954,36 +2004,73 @@ function renderAdminPanel() {
     : '<p class="producto-detalle">No hay reseñas para revisar.</p>';
 
   adminTiendas.innerHTML = tiendasActuales.map(v => `
-    <div class="admin-item">
+    <div class="admin-item" data-admin-texto="${esc(normalizar(`${v.negocio || ''} ${v.responsable || ''} ${v.categoria || ''} ${v.whatsapp || ''}`))}">
       <strong>${esc(v.negocio || 'Tienda sin nombre')}</strong>
       <small>${esc(v.responsable || 'Sin responsable')} · ${esc(v.categoria || 'General')}</small>
-      <div class="admin-actions">
-        <button type="button" class="boton-destacar" data-tienda-destacar="${v.id}">${destacadoVigente(v) ? 'Quitar destacado' : 'Destacar'}</button>
-        <button type="button" class="boton-peligro" data-tienda-eliminar="${v.id}">Eliminar</button>
-      </div>
-      <div class="admin-fecha-destacado">
-        <label for="expiracion-tienda-${v.id}">Expira el</label>
-        <input id="expiracion-tienda-${v.id}" type="datetime-local" min="${fechaParaCampo(new Date())}" value="${fechaParaCampo(v.destacado_hasta)}" data-expiracion-tienda="${v.id}">
-        <button type="button" class="boton-ok" data-guardar-expiracion-tienda="${v.id}">Guardar fecha</button>
-      </div>
+      ${controlesDestacado('tienda', v)}
+      <details class="admin-editor">
+        <summary>Editar datos de la tienda</summary>
+        <form class="admin-editor-form" data-admin-editar-tienda="${esc(v.id)}">
+          <label>Nombre del negocio<input name="negocio" value="${esc(v.negocio)}" maxlength="120" required></label>
+          <label>Responsable<input name="responsable" value="${esc(v.responsable)}" maxlength="120"></label>
+          <label>WhatsApp<input name="whatsapp" type="tel" value="${esc(v.whatsapp)}" maxlength="20"></label>
+          <label>Categoría principal<select name="categoria" required>${opcionesCategoriaAdmin(v.categoria)}</select></label>
+          <label>Dirección<input name="direccion" value="${esc(v.direccion)}" maxlength="180"></label>
+          <label>Emoji<input name="avatar_emoji" value="${esc(v.avatar_emoji)}" maxlength="8"></label>
+          <label class="admin-editor-ancho">Descripción<textarea name="descripcion" rows="3" maxlength="800">${esc(v.descripcion)}</textarea></label>
+          <label class="admin-editor-ancho">URL de la foto de perfil<input name="avatar_url" type="url" value="${esc(v.avatar_url)}" placeholder="https://"></label>
+          <div class="admin-actions admin-editor-ancho">
+            <button type="submit" class="boton-ok">Guardar cambios</button>
+            <button type="button" class="boton-peligro" data-tienda-eliminar="${esc(v.id)}">Eliminar tienda y sus productos</button>
+          </div>
+        </form>
+      </details>
     </div>
   `).join('') || '<p class="producto-detalle">No hay tiendas registradas.</p>';
 
   adminProductos.innerHTML = productosActuales.map(p => `
-    <div class="admin-item">
+    <div class="admin-item" data-admin-texto="${esc(normalizar(`${p.nombre || ''} ${p.categoria || ''} ${vendedores[p.vendedor_id]?.negocio || ''} ${p.detalle || ''}`))}">
       <strong>${esc(p.nombre)}</strong>
-      <small>${esc(p.categoria || 'General')} · S/ ${fmtPrecio(p.precio)}${destacadoVigente(p) ? ` · activo hasta ${fechaCorta(p.destacado_hasta)}` : ''}</small>
-      <div class="admin-actions">
-        <button type="button" class="boton-destacar" data-producto-destacar="${p.id}">${destacadoVigente(p) ? 'Quitar destacado' : 'Destacar'}</button>
-        <button type="button" class="boton-peligro" data-producto-eliminar="${p.id}">Eliminar</button>
-      </div>
-      <div class="admin-fecha-destacado">
-        <label for="expiracion-${p.id}">Expira el</label>
-        <input id="expiracion-${p.id}" type="datetime-local" min="${fechaParaCampo(new Date())}" value="${fechaParaCampo(p.destacado_hasta)}" data-expiracion-producto="${p.id}">
-        <button type="button" class="boton-ok" data-guardar-expiracion="${p.id}">Guardar fecha</button>
-      </div>
+      <small>${esc(p.categoria || 'General')} · S/ ${fmtPrecio(p.precio)} · ${esc(vendedores[p.vendedor_id]?.negocio || 'Tienda no encontrada')}</small>
+      ${controlesDestacado('producto', p)}
+      <details class="admin-editor">
+        <summary>Editar datos del producto</summary>
+        <form class="admin-editor-form" data-admin-editar-producto="${esc(p.id)}">
+          <label>Nombre<input name="nombre" value="${esc(p.nombre)}" maxlength="120" required></label>
+          <label>Categoría<select name="categoria" required>${opcionesCategoriaAdmin(p.categoria)}</select></label>
+          <label>Precio (S/)<input name="precio" type="number" min="0" step="0.01" value="${esc(p.precio)}" required></label>
+          <label class="admin-editor-ancho">Descripción<textarea name="detalle" rows="3" maxlength="1200">${esc(p.detalle)}</textarea></label>
+          <label class="admin-editor-ancho">Etiquetas (separadas por coma, máximo 5)<input name="tags" value="${esc(etiquetasProducto(p).join(', '))}" maxlength="300"></label>
+          <label class="admin-editor-ancho">Fotos (una URL https:// por línea, máximo 6)<textarea name="fotos" rows="3">${esc((Array.isArray(p.fotos) ? p.fotos : []).join('\n'))}</textarea></label>
+          <div class="admin-actions admin-editor-ancho">
+            <button type="submit" class="boton-ok">Guardar cambios</button>
+            <button type="button" class="boton-peligro" data-producto-eliminar="${esc(p.id)}">Eliminar producto</button>
+          </div>
+        </form>
+      </details>
     </div>
   `).join('') || '<p class="producto-detalle">No hay productos en la vitrina.</p>';
+
+  adminPromociones.innerHTML = promociones.length
+    ? promociones.map(promocion => {
+      const vendedor = vendedores[promocion.vendedor_id] || {};
+      const vencimiento = promocion.vence_en ? ` · vence ${fechaCorta(promocion.vence_en)}` : '';
+      const estado = promocion.estado === 'aprobada' ? 'Aprobada' : promocion.estado === 'rechazada' ? 'Rechazada' : 'Pendiente';
+      const foto = urlImagen(promocion.imagen_url);
+      return `<div class="admin-item">
+        <strong>${esc(promocion.titulo)}</strong>
+        <small>${esc(vendedor.negocio || 'Tienda no encontrada')} · ${promocion.duracion_dias} días · ${estado}${vencimiento}</small>
+        <small>${esc(promocion.descripcion)}</small>
+        ${foto ? `<img class="admin-promocion-imagen" src="${esc(foto)}" alt="" loading="lazy">` : ''}
+        <div class="admin-actions">
+          ${promocion.estado === 'pendiente' ? `<button type="button" class="boton-ok" data-promo-admin-aprobar="${esc(promocion.id)}">Aprobar e iniciar contador</button><button type="button" class="boton-peligro" data-promo-admin-rechazar="${esc(promocion.id)}">Rechazar</button>` : ''}
+          <button type="button" class="boton-peligro" data-promo-admin-eliminar="${esc(promocion.id)}">Eliminar</button>
+        </div>
+      </div>`;
+    }).join('')
+    : '<p class="producto-detalle">No hay promociones pendientes ni publicadas.</p>';
+
+  $$('[data-admin-buscar]').forEach(input => filtrarRegistrosAdmin(input.dataset.adminBuscar, input.value));
 
   const solicitudes = state.solicitudesDestacado || [];
   adminSolicitudes.innerHTML = solicitudes.length
@@ -1003,12 +2090,28 @@ function renderAdminPanel() {
     : '<p class="producto-detalle">No hay solicitudes de destacado.</p>';
 }
 
-function abrirAdmin() {
+$$('[data-admin-buscar]').forEach(input => input.addEventListener('input', () => {
+  filtrarRegistrosAdmin(input.dataset.adminBuscar, input.value);
+}));
+
+$('#admin-recargar').addEventListener('click', async e => {
+  const boton = e.currentTarget;
+  boton.disabled = true;
+  try {
+    await cargarDatos();
+    renderAdminPanel();
+  } finally {
+    boton.disabled = false;
+  }
+});
+
+async function abrirAdmin() {
   if (!usuario) return abrirAuth('entrar');
   if (usuario.email !== ADMIN_EMAIL) {
     errAuth('Este panel es solo para administración.', false);
     return;
   }
+  await cargarDatos();
   renderAdminPanel();
   modalAdmin.showModal();
 }
@@ -1057,139 +2160,257 @@ $('#admin-reseñas').addEventListener('click', e => {
   }
 });
 
-$('#admin-tiendas').addEventListener('click', async e => {
-  const state = readLocalState();
-  const destacar = e.target.closest('[data-tienda-destacar]');
-  const guardarFecha = e.target.closest('[data-guardar-expiracion-tienda]');
-  const eliminar = e.target.closest('[data-tienda-eliminar]');
-  if (guardarFecha) {
-    const tienda = vendedores[guardarFecha.dataset.guardarExpiracionTienda];
-    const campo = document.querySelector(`[data-expiracion-tienda="${guardarFecha.dataset.guardarExpiracionTienda}"]`);
-    if (!tienda || !campo) return;
-    if (!campo.value) {
-      tienda.destacado = false;
-      tienda.destacado_hasta = null;
+$('#admin-promociones').addEventListener('click', async e => {
+  const aprobar = e.target.closest('[data-promo-admin-aprobar]');
+  const rechazar = e.target.closest('[data-promo-admin-rechazar]');
+  const eliminar = e.target.closest('[data-promo-admin-eliminar]');
+  const id = aprobar?.dataset.promoAdminAprobar || rechazar?.dataset.promoAdminRechazar || eliminar?.dataset.promoAdminEliminar;
+  if (!id) return;
+  const boton = aprobar || rechazar || eliminar;
+  if (eliminar && !confirm('¿Eliminar esta promoción? Esta acción no se puede deshacer.')) return;
+  boton.disabled = true;
+  try {
+    if (eliminar) {
+      await eliminarRegistro('promociones', id);
     } else {
-      const fecha = new Date(campo.value);
-      if (Number.isNaN(fecha.getTime()) || fecha <= new Date()) {
-        alert('Selecciona una fecha futura para activar el destacado.');
-        return;
-      }
-      tienda.destacado = true;
-      tienda.destacado_hasta = fecha.toISOString();
-    }
-    try {
-      guardarFecha.disabled = true;
-      await guardarDestacado('vendedores', tienda.id, tienda.destacado, tienda.destacado_hasta);
-      state.vendedores[tienda.id] = { ...(state.vendedores[tienda.id] || {}), ...tienda };
-      writeLocalState(state);
-      await cargarDatos();
-      renderAdminPanel();
-    } catch (error) {
-      alert(`No se pudo guardar la fecha del destacado: ${error.message}`);
-    } finally {
-      guardarFecha.disabled = false;
-    }
-    return;
-  }
-  if (destacar) {
-    const tienda = vendedores[destacar.dataset.tiendaDestacar];
-    if (tienda) {
-      try {
-        const destacado = !destacadoVigente(tienda);
-        const hasta = destacado ? new Date(Date.now() + 30 * 86400000).toISOString() : null;
-        await guardarDestacado('vendedores', tienda.id, destacado, hasta);
-        tienda.destacado = destacado;
-        tienda.destacado_hasta = hasta;
-        state.vendedores[tienda.id] = { ...(state.vendedores[tienda.id] || {}), ...tienda };
+      const registro = promociones.find(promocion => promocion.id === id);
+      if (!registro) throw new Error('La promoción ya no está disponible. Actualiza los datos.');
+      const estado = aprobar ? 'aprobada' : 'rechazada';
+      const cambios = {
+        estado,
+        vence_en: aprobar
+          ? new Date(Date.now() + Number(registro.duracion_dias) * MILISEGUNDOS_DIA).toISOString()
+          : null
+      };
+      if (modoDemo || !usaSupabase || esDatoDemo(registro)) {
+        const state = readLocalState();
+        const guardado = state.promociones.find(item => item.id === id);
+        if (!guardado) throw new Error('La promoción no existe en los datos locales.');
+        Object.assign(guardado, cambios);
         writeLocalState(state);
-        await cargarDatos();
-        renderAdminPanel();
-      } catch (error) {
-        alert(`No se pudo actualizar el destacado de la tienda: ${error.message}`);
+      } else {
+        const { error } = await db.from('promociones').update(cambios).eq('id', id);
+        if (error) throw error;
+        const { data, error: errorVerificacion } = await db.from('promociones').select('*').eq('id', id).maybeSingle();
+        if (errorVerificacion) throw errorVerificacion;
+        if (!data || data.estado !== estado || (aprobar && new Date(data.vence_en).getTime() !== new Date(cambios.vence_en).getTime())) {
+          throw new Error('No se guardó la decisión. Verifica los permisos de administración y la conexión.');
+        }
       }
     }
+    await cargarPromociones();
+    renderAdminPanel();
+  } catch (error) {
+    alert(`No se pudo procesar la promoción: ${error.message}`);
+    boton.disabled = false;
   }
-  if (eliminar) {
-    if (!confirm('¿Eliminar esta tienda? La acción no se puede deshacer.')) return;
-    try {
-      const tiendaId = eliminar.dataset.tiendaEliminar;
-      const idsProductos = await eliminarTienda(tiendaId);
-      delete state.vendedores[tiendaId];
-      state.productos = state.productos.filter(producto => producto.vendedor_id !== tiendaId);
-      state.solicitudesDestacado = (state.solicitudesDestacado || []).filter(solicitud =>
-        solicitud.vendedor_id !== tiendaId && !idsProductos.includes(solicitud.producto_id)
-      );
-      writeLocalState(state);
-      await cargarDatos();
-      renderAdminPanel();
-    } catch (error) {
-      alert(`No se pudo eliminar la tienda: ${error.message}`);
+});
+
+async function guardarDestacadoAdmin(tipo, id, activo, dias) {
+  const tabla = tipo === 'tienda' ? 'vendedores' : 'productos';
+  const elemento = tipo === 'tienda' ? vendedores[id] : productos.find(producto => producto.id === id);
+  if (!elemento) throw new Error('El registro ya no está disponible. Actualiza el panel e inténtalo nuevamente.');
+  const hasta = activo ? vencimientoDestacado(dias).toISOString() : null;
+  await guardarDestacado(tabla, id, activo, hasta);
+  elemento.destacado = activo;
+  elemento.destacado_hasta = hasta;
+  const state = readLocalState();
+  if (tipo === 'tienda') state.vendedores[id] = { ...(state.vendedores[id] || {}), ...elemento };
+  else state.productos = [...state.productos.filter(item => item.id !== id), { ...elemento }];
+  writeLocalState(state);
+  await cargarDatos();
+  renderAdminPanel();
+}
+
+function conectarControlesDestacado(contenedor, tipo) {
+  contenedor.addEventListener('input', e => {
+    const campo = e.target.closest('[data-dias-destacado]');
+    if (!campo || campo.dataset.diasDestacado !== tipo) return;
+    const fecha = contenedor.querySelector(`[data-vencimiento-destacado="${tipo}"][data-id="${campo.dataset.id}"]`);
+    const dias = Number(campo.value);
+    if (fecha) fecha.textContent = Number.isInteger(dias) && dias >= 1 && dias <= DIAS_MAX_DESTACADO
+      ? textoVencimiento(dias)
+      : 'Ingresa entre 1 y 365 días';
+  });
+  contenedor.addEventListener('click', async e => {
+    const activar = e.target.closest('[data-activar-destacado]');
+    const quitar = e.target.closest('[data-quitar-destacado]');
+    const boton = activar || quitar;
+    if (!boton || boton.dataset[activar ? 'activarDestacado' : 'quitarDestacado'] !== tipo) return;
+    const campo = [...contenedor.querySelectorAll('[data-dias-destacado]')]
+      .find(input => input.dataset.diasDestacado === tipo && input.dataset.id === boton.dataset.id);
+    const dias = Number(campo?.value);
+    if (activar && (!Number.isInteger(dias) || dias < 1 || dias > DIAS_MAX_DESTACADO)) {
+      campo?.reportValidity();
+      return;
     }
+    boton.disabled = true;
+    try {
+      await guardarDestacadoAdmin(tipo, boton.dataset.id, Boolean(activar), activar ? dias : null);
+    } catch (error) {
+      alert(`No se pudo actualizar el destacado: ${error.message}`);
+      boton.disabled = false;
+    }
+  });
+}
+
+conectarControlesDestacado($('#admin-tiendas'), 'tienda');
+conectarControlesDestacado($('#admin-productos'), 'producto');
+
+function mostrarErrorEdicionAdmin(form, error) {
+  let mensaje = form.querySelector('[data-admin-mensaje]');
+  if (!mensaje) {
+    mensaje = document.createElement('p');
+    mensaje.className = 'admin-editor-mensaje';
+    mensaje.setAttribute('role', 'alert');
+    mensaje.dataset.adminMensaje = '';
+    form.prepend(mensaje);
+  }
+  mensaje.textContent = `No se pudieron guardar los cambios: ${error.message}`;
+}
+
+function valorFormulario(form, nombre) {
+  return String(new FormData(form).get(nombre) || '').trim();
+}
+
+function urlAdminSegura(valor, etiqueta) {
+  if (!valor) return null;
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    throw new Error(`${etiqueta}: introduce una URL válida.`);
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${etiqueta}: solo se permiten enlaces HTTP o HTTPS.`);
+  return url.href;
+}
+
+async function guardarEdicionAdmin(form, tipo) {
+  const id = tipo === 'tienda' ? form.dataset.adminEditarTienda : form.dataset.adminEditarProducto;
+  const tabla = tipo === 'tienda' ? 'vendedores' : 'productos';
+  if (tipo === 'tienda' && !vendedores[id]) throw new Error('La tienda ya no existe.');
+  if (tipo === 'producto' && !productos.some(producto => producto.id === id)) throw new Error('El producto ya no existe.');
+  const cambios = tipo === 'tienda'
+    ? {
+      negocio: valorFormulario(form, 'negocio'),
+      responsable: valorFormulario(form, 'responsable'),
+      whatsapp: soloDigitos(valorFormulario(form, 'whatsapp')),
+      categoria: valorFormulario(form, 'categoria'),
+      direccion: valorFormulario(form, 'direccion') || null,
+      descripcion: valorFormulario(form, 'descripcion') || null,
+      avatar_emoji: valorFormulario(form, 'avatar_emoji') || '🏪',
+      avatar_url: urlAdminSegura(valorFormulario(form, 'avatar_url'), 'Foto de perfil')
+    }
+    : {
+      nombre: valorFormulario(form, 'nombre'),
+      categoria: valorFormulario(form, 'categoria'),
+      precio: Number(valorFormulario(form, 'precio')),
+      detalle: valorFormulario(form, 'detalle') || null,
+      tags: [...new Set(valorFormulario(form, 'tags').split(',').map(tag => tag.trim()).filter(Boolean))],
+      fotos: valorFormulario(form, 'fotos').split(/\r?\n/).map(url => url.trim()).filter(Boolean)
+        .map(url => urlAdminSegura(url, 'Foto del producto'))
+    };
+  if (!cambios.negocio && tipo === 'tienda') throw new Error('El nombre de la tienda es obligatorio.');
+  if (!cambios.nombre && tipo === 'producto') throw new Error('El nombre del producto es obligatorio.');
+  if (tipo === 'tienda' && cambios.whatsapp && (cambios.whatsapp.length < 8 || cambios.whatsapp.length > 15)) {
+    throw new Error('El WhatsApp debe tener entre 8 y 15 dígitos.');
+  }
+  if (!CATEGORIAS_DEMO.includes(cambios.categoria)) throw new Error('Selecciona una categoría válida.');
+  if (tipo === 'producto') {
+    if (!Number.isFinite(cambios.precio) || cambios.precio < 0) throw new Error('El precio debe ser un número igual o mayor que cero.');
+    if (cambios.tags.length > MAX_ETIQUETAS) throw new Error(`Usa como máximo ${MAX_ETIQUETAS} etiquetas.`);
+    const urlsFotos = valorFormulario(form, 'fotos').split(/\r?\n/).map(url => url.trim()).filter(Boolean);
+    if (urlsFotos.length > MAX_FOTOS) throw new Error(`Usa como máximo ${MAX_FOTOS} fotos.`);
+    cambios.emoji = EMOJI_CAT[cambios.categoria] || '🛒';
+  }
+  const guardado = await actualizarRegistroAdmin(tabla, id, cambios);
+  const state = readLocalState();
+  if (tipo === 'tienda') {
+    vendedores[id] = { ...vendedores[id], ...guardado };
+    state.vendedores[id] = { ...(state.vendedores[id] || {}), ...guardado };
+    writeLocalState(state);
+  } else {
+    guardarProductoLocal({ ...productos.find(producto => producto.id === id), ...guardado });
+  }
+  await cargarDatos();
+  renderAdminPanel();
+}
+
+$('#admin-tiendas').addEventListener('submit', async e => {
+  const form = e.target.closest('[data-admin-editar-tienda]');
+  if (!form) return;
+  e.preventDefault();
+  const boton = form.querySelector('[type="submit"]');
+  boton.disabled = true;
+  try {
+    await guardarEdicionAdmin(form, 'tienda');
+  } catch (error) {
+    mostrarErrorEdicionAdmin(form, error);
+    boton.disabled = false;
+  }
+});
+
+$('#admin-productos').addEventListener('submit', async e => {
+  const form = e.target.closest('[data-admin-editar-producto]');
+  if (!form) return;
+  e.preventDefault();
+  const boton = form.querySelector('[type="submit"]');
+  boton.disabled = true;
+  try {
+    await guardarEdicionAdmin(form, 'producto');
+  } catch (error) {
+    mostrarErrorEdicionAdmin(form, error);
+    boton.disabled = false;
+  }
+});
+
+$('#admin-tiendas').addEventListener('click', async e => {
+  const eliminar = e.target.closest('[data-tienda-eliminar]');
+  if (!eliminar) return;
+  const tiendaId = eliminar.dataset.tiendaEliminar;
+  const productosTienda = productos.filter(producto => producto.vendedor_id === tiendaId);
+  if (!confirm(`¿Eliminar esta tienda y sus ${productosTienda.length} productos? La acción no se puede deshacer.`)) return;
+  eliminar.disabled = true;
+  try {
+    const state = readLocalState();
+    const idsProductos = await eliminarTienda(tiendaId);
+    const eliminado = productos.filter(producto => producto.vendedor_id === tiendaId);
+    delete state.vendedores[tiendaId];
+    state.productos = state.productos.filter(producto => producto.vendedor_id !== tiendaId);
+    state.solicitudesDestacado = (state.solicitudesDestacado || []).filter(solicitud =>
+      solicitud.vendedor_id !== tiendaId && !idsProductos.includes(solicitud.producto_id)
+    );
+    writeLocalState(state);
+    await eliminarFotosProductos(eliminado);
+    await cargarDatos();
+    renderAdminPanel();
+  } catch (error) {
+    await cargarDatos();
+    renderAdminPanel();
+    alert(`No se pudo completar la eliminación de la tienda: ${error.message}`);
   }
 });
 
 $('#admin-productos').addEventListener('click', async e => {
-  const state = readLocalState();
-  const guardarFecha = e.target.closest('[data-guardar-expiracion]');
-  const destacar = e.target.closest('[data-producto-destacar]');
   const eliminar = e.target.closest('[data-producto-eliminar]');
-  if (guardarFecha) {
-    const producto = productos.find(p => p.id === guardarFecha.dataset.guardarExpiracion);
-    const campo = document.querySelector(`[data-expiracion-producto="${guardarFecha.dataset.guardarExpiracion}"]`);
-    if (!producto || !campo) return;
-    if (!campo.value) {
-      producto.destacado = false;
-      producto.destacado_hasta = null;
-    } else {
-      const fecha = new Date(campo.value);
-      if (Number.isNaN(fecha.getTime()) || fecha <= new Date()) {
-        alert('Selecciona una fecha futura para activar el destacado.');
-        return;
-      }
-      producto.destacado = true;
-      producto.destacado_hasta = fecha.toISOString();
-    }
-    try {
-      guardarFecha.disabled = true;
-      await guardarDestacado('productos', producto.id, producto.destacado, producto.destacado_hasta);
-      guardarProductoLocal(producto);
-      await cargarDatos();
-      guardarProductoLocal(productos.find(item => item.id === producto.id) || producto);
-      renderAdminPanel();
-    } catch (error) {
-      alert(`No se pudo guardar la fecha del destacado: ${error.message}`);
-    } finally {
-      guardarFecha.disabled = false;
-    }
-    return;
-  }
-  if (destacar) {
-    const producto = productos.find(p => p.id === destacar.dataset.productoDestacar);
-    if (producto) {
-      try {
-        producto.destacado = !destacadoVigente(producto);
-        producto.destacado_hasta = producto.destacado ? new Date(Date.now() + 30 * 86400000).toISOString() : null;
-        await guardarDestacado('productos', producto.id, producto.destacado, producto.destacado_hasta);
-        guardarProductoLocal(producto);
-        await cargarDatos();
-      } catch (error) {
-        alert(`No se pudo actualizar el destacado del producto: ${error.message}`);
-      }
-    }
+  if (!eliminar) return;
+  const id = eliminar.dataset.productoEliminar;
+  if (!confirm('¿Eliminar este producto? La acción no se puede deshacer.')) return;
+  eliminar.disabled = true;
+  try {
+    const producto = productos.find(item => item.id === id);
+    await eliminarRegistro('productos', id);
+    const state = readLocalState();
+    state.productos = state.productos.filter(item => item.id !== id);
+    state.solicitudesDestacado = (state.solicitudesDestacado || []).filter(item => item.producto_id !== id);
+    writeLocalState(state);
+    await eliminarFotosProductos(producto ? [producto] : []);
+    await cargarDatos();
     renderAdminPanel();
-  }
-  if (eliminar) {
-    if (!confirm('¿Eliminar este producto? La acción no se puede deshacer.')) return;
-    try {
-      await eliminarRegistro('productos', eliminar.dataset.productoEliminar);
-      state.productos = state.productos.filter(p => p.id !== eliminar.dataset.productoEliminar);
-      writeLocalState(state);
-      await cargarDatos();
-      renderAdminPanel();
-    } catch (error) {
-      alert(`No se pudo eliminar el producto: ${error.message}`);
-    }
+  } catch (error) {
+    await cargarDatos();
+    renderAdminPanel();
+    alert(`No se pudo completar la eliminación del producto: ${error.message}`);
   }
 });
 
@@ -1375,7 +2596,8 @@ function pintarMisProductos() {
       ? `<img src="${esc(urlImagen(p.fotos[0]))}" alt="">` : (p.emoji || '🛒');
     return `<div class="mini-item">
       <span class="mini-thumb">${thumb}</span>
-      <strong>${esc(p.nombre)}<small>S/ ${fmtPrecio(p.precio)} · ${esc(p.categoria)} · ${(p.fotos || []).length} foto(s)</small></strong>
+      <strong>${esc(p.nombre)}<small>${descuentoVigente(p) ? `S/ ${fmtPrecio(precioConDescuento(p))} (antes S/ ${fmtPrecio(p.precio)})` : `S/ ${fmtPrecio(p.precio)}`} · ${esc(p.categoria)} · ${(p.fotos || []).length} foto(s)</small></strong>
+      <button type="button" class="boton boton--linea" data-editar-producto="${esc(p.id)}">Editar producto</button>
       <select class="select-destacado" data-destacado-plan="${p.id}" aria-label="Duración del destacado">
         <option value="7">7 días · S/ 10</option>
         <option value="15">15 días · S/ 18</option>
@@ -1388,6 +2610,27 @@ function pintarMisProductos() {
 }
 
 $('#lista-mis-productos').addEventListener('click', async e => {
+  const editar = e.target.closest('[data-editar-producto]');
+  if (editar) {
+    const producto = productos.find(item => item.id === editar.dataset.editarProducto && item.vendedor_id === usuario?.id);
+    if (!producto) return;
+    const formulario = $('#form-editar-producto');
+    formulario.elements.producto_id.value = producto.id;
+    formulario.elements.nombre.value = producto.nombre || '';
+    formulario.elements.precio.value = producto.precio;
+    formulario.elements.detalle.value = producto.detalle || '';
+    formulario.elements.descuento_porcentaje.value = descuentoVigente(producto) ? producto.descuento_porcentaje : 0;
+    const modoDias = descuentoVigente(producto) && Boolean(producto.descuento_hasta);
+    formulario.elements.descuento_modo.value = modoDias ? 'dias' : 'permanente';
+    const diasRestantes = modoDias
+      ? Math.max(1, Math.ceil((new Date(producto.descuento_hasta).getTime() - Date.now()) / MILISEGUNDOS_DIA))
+      : 7;
+    formulario.elements.descuento_dias.value = Math.min(365, diasRestantes);
+    formulario.querySelector('[data-descuento-dias-wrap]').hidden = !modoDias;
+    $('#editar-producto-msg').hidden = true;
+    $('#modal-editar-producto').showModal();
+    return;
+  }
   const solicitar = e.target.closest('[data-solicitar-destacado]');
   if (solicitar) {
     const selector = document.querySelector(`[data-destacado-plan="${solicitar.dataset.solicitarDestacado}"]`);
@@ -1397,12 +2640,104 @@ $('#lista-mis-productos').addEventListener('click', async e => {
   const b = e.target.closest('[data-borrar]'); if (!b) return;
   if (!confirm('¿Eliminar este producto de la vitrina?')) return;
   const p = productos.find(x => x.id === b.dataset.borrar);
-  await db.from('productos').delete().eq('id', b.dataset.borrar).eq('vendedor_id', usuario.id);
-  if (p && Array.isArray(p.fotos) && p.fotos.length) {
-    const rutas = p.fotos.map(u => decodeURIComponent((u.split('/fotos/')[1] || ''))).filter(Boolean);
-    if (rutas.length && db.storage) await db.storage.from('fotos').remove(rutas);
+  b.disabled = true;
+  try {
+    const resultado = await db.from('productos').delete().eq('id', b.dataset.borrar).eq('vendedor_id', usuario.id);
+    if (resultado.error) throw resultado.error;
+    const verificado = await db.from('productos').select('id').eq('id', b.dataset.borrar).eq('vendedor_id', usuario.id).maybeSingle();
+    if (verificado.error) throw verificado.error;
+    if (verificado.data) throw new Error('El producto sigue publicado. Verifica los permisos de tu cuenta.');
+    const state = readLocalState();
+    state.productos = state.productos.filter(producto => producto.id !== b.dataset.borrar);
+    state.solicitudesDestacado = (state.solicitudesDestacado || []).filter(solicitud => solicitud.producto_id !== b.dataset.borrar);
+    writeLocalState(state);
+    await eliminarFotosProductos(p ? [p] : []);
+  } catch (error) {
+    alert(`No se pudo completar la eliminación: ${error.message}`);
   }
   await cargarDatos();
+});
+
+$('#form-editar-producto').elements.descuento_modo.addEventListener('change', e => {
+  e.target.form.querySelector('[data-descuento-dias-wrap]').hidden = e.target.value !== 'dias';
+});
+
+$('#form-editar-producto').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const boton = form.querySelector('[type="submit"]');
+  const mensaje = $('#editar-producto-msg');
+  const id = valorFormulario(form, 'producto_id');
+  const producto = productos.find(item => item.id === id && item.vendedor_id === usuario?.id);
+  if (!producto) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = 'No encontramos este producto en tu tienda.';
+    return;
+  }
+  const porcentaje = Number(valorFormulario(form, 'descuento_porcentaje'));
+  const dias = Number(valorFormulario(form, 'descuento_dias'));
+  if (!Number.isInteger(porcentaje) || porcentaje < 0 || porcentaje > 90) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = 'El descuento debe ser un número entero entre 0 % y 90 %.';
+    return;
+  }
+  const precio = Number(valorFormulario(form, 'precio'));
+  if (!Number.isFinite(precio) || precio < 0) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = 'El precio debe ser un número igual o mayor que cero.';
+    return;
+  }
+  const modo = valorFormulario(form, 'descuento_modo');
+  if (porcentaje > 0 && modo === 'dias' && (!Number.isInteger(dias) || dias < 1 || dias > 365)) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = 'La duración debe ser de 1 a 365 días.';
+    return;
+  }
+  const cambios = {
+    nombre: valorFormulario(form, 'nombre'),
+    precio,
+    detalle: valorFormulario(form, 'detalle') || null,
+    descuento_porcentaje: porcentaje,
+    descuento_hasta: porcentaje > 0 && modo === 'dias'
+      ? new Date(Date.now() + dias * MILISEGUNDOS_DIA).toISOString()
+      : null
+  };
+  if (!cambios.nombre) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = 'El nombre del producto es obligatorio.';
+    return;
+  }
+  boton.disabled = true;
+  try {
+    let guardado;
+    if (esDatoDemo(producto)) {
+      guardado = await actualizarRegistroAdmin('productos', id, cambios);
+    } else if (!usaSupabase) {
+      guardarProductoLocal({ ...producto, ...cambios });
+      guardado = { ...producto, ...cambios };
+    } else {
+      const { data, error } = await db.from('productos').update(cambios)
+        .eq('id', id).eq('vendedor_id', usuario.id).select('*').maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('No se guardaron los cambios. Verifica que seas propietario de este producto.');
+      guardado = data;
+      guardarProductoLocal({ ...producto, ...guardado });
+    }
+    if (esDatoDemo(producto)) guardarProductoLocal({ ...producto, ...guardado });
+    await cargarDatos();
+    $('#modal-editar-producto').close();
+  } catch (error) {
+    mensaje.hidden = false;
+    mensaje.className = 'modal-nota msg-error modal-ancho';
+    mensaje.textContent = `No se pudo guardar el producto: ${error.message}`;
+  } finally {
+    boton.disabled = false;
+  }
 });
 
 function renderizarReseñas() {
@@ -1414,7 +2749,7 @@ function renderizarReseñas() {
     $('#testimonio-puntos').innerHTML = '';
     $('#testimonio-anterior').hidden = true;
     $('#testimonio-siguiente').hidden = true;
-    cont.innerHTML = '<div class="testimonio-slide activo"><blockquote>"La mejor manera de comprar es apoyar a quienes producen cerca de casa."</blockquote><p class="testimonio-autor">DE NUESTRA TIERRA</p></div>';
+    cont.innerHTML = '<div class="testimonio-slide activo"><blockquote>"La mejor manera de comprar es apoyar a quienes producen cerca de casa."</blockquote><p class="testimonio-autor">Cerca de ti</p></div>';
     return;
   }
   const slides = pendientes.map(r => `
@@ -1495,6 +2830,10 @@ $('#pie-subir').addEventListener('click', e => {
 /* ---------- Cierre de modales ---------- */
 $$('dialog [data-cerrar]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
 $$('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+modalPromocion.addEventListener('close', () => {
+  if (vistaPreviaPromocionUrl) URL.revokeObjectURL(vistaPreviaPromocionUrl);
+  vistaPreviaPromocionUrl = null;
+});
 
 /* ---------- Arranque ---------- */
 pintarZonaUsuario();
@@ -1506,5 +2845,5 @@ db.auth.getSession().then(async ({ data }) => {
   await cargarDatos();
 });
 
-console.log('%c🏞️ DE NUESTRA TIERRA %c vitrina local viva', 'font-weight:bold;font-size:14px', 'color:#2e4b3c');
+console.log('%c🏞️ Cerca de ti %c vitrina local viva', 'font-weight:bold;font-size:14px', 'color:#2e4b3c');
 })();
