@@ -1,5 +1,5 @@
 /* ============================================================
-DE NUESTRA TIERRA · Vitrina local de San Marcos
+Cerca de ti · Vitrina local de San Marcos
 Paleta: crema / verde chacra / ámbar / menta
 Tipografías: Fraunces (títulos) + Karla (texto)
 ============================================================ */
@@ -124,12 +124,10 @@ img { max-width: 100%; display: block; }
 }
 .marca { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--tinta); }
 .marca-logo {
-  width: 44px; height: 44px; flex: none;
-  display: block; overflow: hidden;
-  background: var(--verde); border-radius: 50%;
-  box-shadow: 0 3px 10px rgba(33, 50, 42, .18);
+  width: min(180px, 48vw); aspect-ratio: 2.39; flex: none;
+  display: block;
 }
-.marca-logo img { width: 100%; height: 100%; object-fit: cover; }
+.marca-logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .marca-texto { display: flex; flex-direction: column; line-height: 1.2; }
 .marca-texto strong { font-family: 'Fraunces', serif; font-size: 1.2rem; font-weight: 700; }
 .marca-texto small { font-size: .74rem; color: var(--tinta-suave); }
@@ -147,8 +145,8 @@ img { max-width: 100%; display: block; }
 .zona-usuario { display: flex; align-items: center; gap: 10px; }
 .zona-usuario .boton { padding: 10px 16px; font-size: .88rem; }
 .boton-publicar-rapido { white-space: nowrap; }
-.admin-logo { width: 26px; height: 26px; display: block; overflow: hidden; border-radius: 50%; background: var(--verde); }
-.admin-logo img { width: 100%; height: 100%; object-fit: cover; }
+.admin-logo { width: 62px; height: 26px; display: block; }
+.admin-logo img { width: 100%; height: 100%; object-fit: contain; }
 
 .boton-menu {
   display: none; flex-direction: column;
@@ -1076,6 +1074,12 @@ img { max-width: 100%; display: block; }
 /* ---------- Pie ---------- */
 .pie { background: var(--verde-oscuro); color: #cfdcd2; }
 .pie-rejilla { display: grid; gap: 40px; padding: 60px 0 44px; }
+.pie .marca-logo {
+  width: min(220px, 100%);
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--crema);
+}
 .pie .marca-texto strong { color: #fff; }
 .pie .marca-texto small { color: #a9bfb0; }
 .pie-marca p { margin-top: 16px; max-width: 32ch; color: #b9cdc0; line-height: 1.7; }
@@ -1674,6 +1678,21 @@ RESPONSIVE
 @keyframes flotar {
   0%, 100% { margin-top: 0; }
   50%      { margin-top: -9px; }
+}
+
+@media (min-width: 921px) and (max-width: 1100px) {
+  .boton-menu { display: inline-flex; }
+  .navegacion {
+    display: none; position: absolute;
+    top: 100%; left: 0; right: 0;
+    flex-direction: column; gap: 4px;
+    background: var(--blanco);
+    padding: 16px 22px 26px;
+    border-bottom: 1px solid var(--borde);
+    box-shadow: var(--sombra);
+  }
+  .navegacion a { padding: 13px 16px; }
+  .cabecera.abierta .navegacion { display: flex; }
 }
 
 @media (max-width: 920px) {

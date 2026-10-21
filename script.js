@@ -842,6 +842,16 @@ const makeLocalDb = () => {
 
 document.head.insertAdjacentHTML('beforeend', '<style>[hidden]{display:none!important}</style>');
 
+const navegacion = performance.getEntriesByType('navigation')[0];
+if (navegacion?.type === 'reload' && 'scrollRestoration' in history) {
+  const restauracionScrollAnterior = history.scrollRestoration;
+  history.scrollRestoration = 'manual';
+  window.addEventListener('pageshow', () => {
+    window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
+    history.scrollRestoration = restauracionScrollAnterior;
+  }, { once: true });
+}
+
 const modoDemo = new URLSearchParams(window.location.search).get('demo') === '1';
 const usaSupabase = Boolean(window.supabase && !SUPABASE_URL.includes('TU-PROYECTO') && !modoDemo);
 const db = usaSupabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : makeLocalDb();
@@ -900,24 +910,6 @@ let vencimientoIntervaloPromociones = null;
 let vistaPreviaPromocionUrl = null;
 let scrollDetalleOrigen = null;
 $('#publicar-contenedor').append($('#seccion-publicar'));
-const frasesPorHorario = {
-  mañana: [
-    'productos frescos de productores locales',
-    'sabores de San Marcos para tu mesa',
-    'negocios locales a un mensaje de distancia'
-  ],
-  tarde: [
-    'emprendimientos sanmarquinos con mucho que ofrecer',
-    'opciones para tu hogar y tu día a día',
-    'productos y servicios de la comunidad'
-  ],
-  noche: [
-    'productos locales para cada ocasión',
-    'creaciones hechas por manos sanmarquinas',
-    'negocios de San Marcos que puedes explorar en línea'
-  ]
-};
-const INTERVALO_SLOGAN = 10 * 60 * 1000;
 const INTERVALO_TESTIMONIO = 5 * 60 * 1000;
 let intervaloTestimonios = null;
 
@@ -946,10 +938,7 @@ async function cargarDatos() {
     productos = [...productosDemo, ...productosReales];
     vendedores = {
       ...Object.fromEntries(vendedoresDemo.map(vendedor => [vendedor.id, vendedor])),
-      ...Object.fromEntries(vendedoresRemotos.map(vendedor => [vendedor.id, {
-        ...vendedor,
-        ...(local.vendedores[vendedor.id] || {})
-      }]))
+      ...Object.fromEntries(vendedoresRemotos.map(vendedor => [vendedor.id, vendedor]))
     };
     await cargarPromociones();
     const idsDestacadosVencidos = new Set([
@@ -1668,7 +1657,7 @@ function limpiarRetornoAuth() {
 
 function pintarZonaUsuario() {
   if (usuario && usuario.email === ADMIN_EMAIL) {
-    zona.innerHTML = `<button type="button" class="chip chip-avatar chip--activo" data-accion="admin" title="Panel de administración"> <span class="admin-logo"><img src="DE%20NUESTRA%20TIERRA%20SM.jpeg" alt=""></span>Administración</button> <button type="button" class="boton boton--linea" data-accion="salir">Salir</button>`;
+    zona.innerHTML = `<button type="button" class="chip chip-avatar chip--activo" data-accion="admin" title="Panel de administración"> <span class="admin-logo"><img src="Logo%20cerca%20de%20ti%20encabezado.png" alt=""></span>Administración</button> <button type="button" class="boton boton--linea" data-accion="salir">Salir</button>`;
   } else if (usuario && miPerfil) {
     const av = urlImagen(miPerfil.avatar_url) ? `<img src="${esc(urlImagen(miPerfil.avatar_url))}" alt="">` : esc(miPerfil.avatar_emoji || '🏪');
     zona.innerHTML = `<button type="button" class="boton boton--ambar boton-publicar-rapido" data-accion="publicar" title="Publicar un producto">＋ Publicar</button> <button type="button" class="chip chip-avatar chip--activo" data-accion="panel" title="Administrar mi tienda"> <span>${av}</span>${esc(miPerfil.negocio || 'Mi tienda')}</button> <button type="button" class="boton boton--linea" data-accion="salir">Salir</button>`;
@@ -1852,7 +1841,9 @@ function procesarImagen(file, max = 900) {
 async function subirFoto(blob, ruta) {
   const { error } = await db.storage.from('fotos').upload(ruta, blob, { contentType: 'image/jpeg', upsert: true });
   if (error) throw error;
-  return db.storage.from('fotos').getPublicUrl(ruta).data.publicUrl;
+  const url = new URL(db.storage.from('fotos').getPublicUrl(ruta).data.publicUrl);
+  url.searchParams.set('v', String(Date.now()));
+  return url.href;
 }
 
 function abrirFormularioPromocion() {
@@ -3145,19 +3136,6 @@ $('#form-reseña').addEventListener('submit', async e => {
   renderizarReseñas();
 });
 
-function actualizarSlogan() {
-  const el = $('#slogan-rotativo');
-  if (!el) return;
-  const hora = new Date().getHours();
-  const horario = hora >= 6 && hora < 12 ? 'mañana' : hora >= 12 && hora < 18 ? 'tarde' : 'noche';
-  const frases = frasesPorHorario[horario];
-  let indice = Number(el.dataset.fraseIndice || 0);
-  el.textContent = frases[indice % frases.length];
-  el.dataset.fraseIndice = String((indice + 1) % frases.length);
-}
-
-actualizarSlogan();
-setInterval(actualizarSlogan, INTERVALO_SLOGAN);
 renderizarReseñas();
 
 $('#pie-subir').addEventListener('click', e => {
