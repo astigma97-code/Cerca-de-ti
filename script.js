@@ -902,20 +902,19 @@ let scrollDetalleOrigen = null;
 $('#publicar-contenedor').append($('#seccion-publicar'));
 const frasesPorHorario = {
   mañana: [
-    'fresco y cercano',
-    'directo de nuestras manos a tu mesa',
-    'despierto desde temprano'
+    'productos frescos de productores locales',
+    'sabores de San Marcos para tu mesa',
+    'negocios locales a un mensaje de distancia'
   ],
   tarde: [
-    'listo para llevarte lo mejor',
-    'lo bueno de San Marcos, más cerca',
-    'hecho con identidad'
+    'emprendimientos sanmarquinos con mucho que ofrecer',
+    'opciones para tu hogar y tu día a día',
+    'productos y servicios de la comunidad'
   ],
   noche: [
-    'abierto todo el día',
-    'productos que cuentan historias',
-    'compra local, apoya lo nuestro',
-    'cada día, algo nuevo de nuestra tierra'
+    'productos locales para cada ocasión',
+    'creaciones hechas por manos sanmarquinas',
+    'negocios de San Marcos que puedes explorar en línea'
   ]
 };
 const INTERVALO_SLOGAN = 10 * 60 * 1000;
