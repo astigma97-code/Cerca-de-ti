@@ -13,9 +13,9 @@ Todo guardado en Supabase (Auth + Postgres + Storage).
 const SUPABASE_URL = 'https://nbnsgovzdzknrwbdldtl.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_bfNRZKhfM-deggZHlLALUQ_dWlcGk20';
 const ADMIN_EMAIL = 'info.vitrinasanmarcos@gmail.com';
-const ADMIN_PASSWORD = 'admin2026';
 const ADMIN_WHATSAPP = '51940771593';
 const CONTACTO_WHATSAPP = ADMIN_WHATSAPP;
+const esCorreoAdmin = correo => correo?.trim().toLowerCase() === ADMIN_EMAIL;
 const PLANES_DESTACADO = {
   '7': { dias: 7, precio: 10 },
   '15': { dias: 15, precio: 18 },
@@ -780,11 +780,6 @@ const makeLocalDb = () => {
       },
       signInWithPassword: async ({ email, password }) => {
         const normalizedEmail = (email || '').trim().toLowerCase();
-        if (normalizedEmail === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-          const user = { id: 'admin', email: ADMIN_EMAIL, user_metadata: { negocio: 'Administración' } };
-          localStorage.setItem('de_nuestra_tierra_user', JSON.stringify(user));
-          return { data: { user: normalizeUser(user) }, error: null };
-        }
         const sessionUser = JSON.parse(localStorage.getItem('de_nuestra_tierra_users') || '{}');
         const found = Object.values(sessionUser).find(item => String(item.email).toLowerCase() === normalizedEmail && String(item.password) === String(password));
         if (found) {
@@ -1653,14 +1648,14 @@ document.addEventListener('click', e => { if (cabecera.classList.contains('abier
 
 /* ---------- Sesión y zona de usuario ---------- */
 async function cargarPerfil() {
-  if (!usuario) { miPerfil = null; return; }
+  if (!usuario || esCorreoAdmin(usuario.email)) { miPerfil = null; return; }
   const r = await db.from('vendedores').select('*').eq('id', usuario.id).maybeSingle();
   if (r.error) throw r.error;
   miPerfil = r.data;
 }
 
 async function completarPerfilTrasConfirmacion() {
-  if (!usuario || usuario.email === ADMIN_EMAIL || miPerfil || !usuario.user_metadata?.negocio) return;
+  if (!usuario || esCorreoAdmin(usuario.email) || miPerfil || !usuario.user_metadata?.negocio) return;
   const metadata = usuario.user_metadata;
   const { error } = await db.from('vendedores').upsert({
     id: usuario.id,
@@ -1680,7 +1675,7 @@ function limpiarRetornoAuth() {
 }
 
 function pintarZonaUsuario() {
-  if (usuario && usuario.email === ADMIN_EMAIL) {
+  if (usuario && esCorreoAdmin(usuario.email)) {
     zona.innerHTML = `<button type="button" class="chip chip-avatar chip--activo" data-accion="admin" title="Panel de administración"> <span class="admin-logo"><img src="Logo%20cerca%20de%20ti%20encabezado.png" alt=""></span>Administración</button> <button type="button" class="boton boton--linea" data-accion="salir">Salir</button>`;
   } else if (usuario && miPerfil) {
     const av = urlImagen(miPerfil.avatar_url) ? `<img src="${esc(urlImagen(miPerfil.avatar_url))}" alt="">` : esc(miPerfil.avatar_emoji || '🏪');
@@ -1758,29 +1753,28 @@ $('#c-pass-mostrar').addEventListener('click', e => {
 $('#form-entrar').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = e.target.querySelector('button[type="submit"]'); btn.disabled = true;
-  const email = $('#e-email').value.trim();
+  const email = $('#e-email').value.trim().toLowerCase();
   const password = $('#e-pass').value;
   try {
-    if (email.toLowerCase() === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-      if (usaSupabase) {
-        const { error } = await db.auth.signInWithPassword({ email, password });
-        if (error) return errAuth(traducir(error.message));
-        modalAuth.close(); e.target.reset();
-        return;
+    if (esCorreoAdmin(email)) {
+      if (!usaSupabase) {
+        return errAuth('El panel de administración requiere una conexión activa con Supabase.');
       }
-      usuario = { id: 'admin', email: ADMIN_EMAIL, user_metadata: { negocio: 'Administración' } };
-      miPerfil = { id: 'admin', negocio: 'Administración', responsable: 'Admin', whatsapp: CONTACTO_WHATSAPP, categoria: 'General', descripcion: 'Panel de administración', avatar_emoji: '🏞️', avatar_url: '' };
-      localStorage.setItem('de_nuestra_tierra_user', JSON.stringify(usuario));
+      const { data, error } = await db.auth.signInWithPassword({ email, password });
+      if (error) return errAuth(traducir(error.message));
+      if (!data.user) throw new Error('Supabase no devolvió una sesión de usuario. Revisa la cuenta administradora en Authentication → Users.');
+      usuario = data.user;
+      miPerfil = null;
       pintarZonaUsuario();
       modalAuth.close(); e.target.reset();
-      abrirAdmin();
+      await abrirAdmin();
       return;
     }
     const { error } = await db.auth.signInWithPassword({ email, password });
     if (error) return errAuth(traducir(error.message));
     modalAuth.close(); e.target.reset();
   } catch (error) {
-    errAuth('No se pudo iniciar sesión. Revisa tu conexión e inténtalo nuevamente.');
+    errAuth(error.message || 'No se pudo iniciar sesión. Revisa tu conexión e inténtalo nuevamente.');
     console.error('Error de inicio de sesión:', error);
   } finally {
     btn.disabled = false;
@@ -1872,7 +1866,7 @@ async function subirFoto(blob, ruta) {
 
 function abrirFormularioPromocion() {
   if (!usuario) return abrirAuth('entrar');
-  if (usuario.email === ADMIN_EMAIL) return abrirAdmin();
+  if (esCorreoAdmin(usuario.email)) return abrirAdmin();
   if (!miPerfil) return abrirPanel();
   const selector = $('#promo-producto');
   const propios = productos.filter(producto => producto.vendedor_id === usuario.id);
@@ -1947,7 +1941,11 @@ $('#form-promocion').addEventListener('submit', async e => {
     const titulo = $('#promo-titulo').value.trim();
     const descripcion = $('#promo-descripcion').value.trim();
     const duracion = Number($('#promo-dias').value);
-    if (titulo.length < 3 || descripcion.length < 10) throw new Error('Escribe un título de al menos 3 caracteres y una descripción de al menos 10.');
+    const longitudDescripcion = Array.from(descripcion).length;
+    if (titulo.length < 3) throw new Error('Escribe un título de al menos 3 caracteres.');
+    if (longitudDescripcion < 10 || longitudDescripcion > 500) {
+      throw new Error('La descripción debe tener entre 10 y 500 caracteres, sin contar espacios al inicio o al final.');
+    }
     if (!Number.isInteger(duracion) || duracion < 1 || duracion > 30) throw new Error('La duración debe ser de 1 a 30 días.');
     const archivo = $('#promo-imagen').files[0];
     let imagenUrl = producto && Array.isArray(producto.fotos) ? urlImagen(producto.fotos[0]) : '';
@@ -2003,7 +2001,7 @@ $('#form-promocion').addEventListener('submit', async e => {
 /* ---------- Panel: abrir y cargar perfil ---------- */
 function abrirPanel() {
   if (!usuario) return abrirAuth('entrar');
-  if (usuario.email === ADMIN_EMAIL) return abrirAdmin();
+  if (esCorreoAdmin(usuario.email)) return abrirAdmin();
   if (miPerfil) {
     $('#p-negocio').value = miPerfil.negocio || '';
     $('#p-responsable').value = miPerfil.responsable || '';
@@ -2262,7 +2260,7 @@ async function compartirImagenQR(vendedor, idContenedor, idCampo, idMensaje) {
 
 function abrirPublicador() {
   if (!usuario) return abrirAuth('entrar');
-  if (usuario.email === ADMIN_EMAIL) return abrirAdmin();
+  if (esCorreoAdmin(usuario.email)) return abrirAdmin();
   if (!miPerfil) return abrirPanel();
   modalPublicar.showModal();
   requestAnimationFrame(() => {
@@ -2490,7 +2488,7 @@ $('#admin-recargar').addEventListener('click', async e => {
 
 async function abrirAdmin() {
   if (!usuario) return abrirAuth('entrar');
-  if (usuario.email !== ADMIN_EMAIL) {
+  if (!esCorreoAdmin(usuario.email)) {
     errAuth('Este panel es solo para administración.', false);
     return;
   }
@@ -3308,6 +3306,12 @@ db.auth.getSession().then(async ({ data }) => {
       console.error('Error al abrir una tienda compartida:', error);
     }
   }
+}).catch(error => {
+  usuario = null;
+  miPerfil = null;
+  pintarZonaUsuario();
+  console.error('No se pudo recuperar la sesión de Supabase:', error);
+  cargarDatos();
 });
 
 console.log('%c🏞️ Cerca de ti %c vitrina local viva', 'font-weight:bold;font-size:14px', 'color:#2e4b3c');
