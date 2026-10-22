@@ -140,10 +140,6 @@
             </select>
           </div>
         </div>
-        <aside class="aviso-catalogo-demo" id="aviso-catalogo-demo" role="note" hidden>
-          <span aria-hidden="true">ℹ️</span>
-          <p><strong>Catálogo de demostración:</strong> productos, imágenes, precios y vendedores son ejemplos para probar la vitrina. No son ofertas reales y los botones de contacto están desactivados.</p>
-        </aside>
         <div class="filtros" id="filtros">
           <button class="chip chip--activo" data-filtro="todos" aria-pressed="true">Todos</button>
           <button class="chip" data-filtro="alimentos">Alimentos</button>
@@ -168,7 +164,7 @@
           <button class="chip" data-filtro="tecnologia">Tecnología</button>
           <button class="chip" data-filtro="otro">Otro</button>
         </div>
-        <aside class="aviso-catalogo-demo promocion-aviso" id="aviso-promociones" role="status" hidden></aside>
+        <aside class="promocion-aviso" id="aviso-promociones" role="status" hidden></aside>
         <div class="productos-rejilla" id="lista-productos"></div>
         <div class="sin-resultados" id="sin-resultados" hidden>
           <p class="sin-resultados-titulo">Tu próxima compra puede empezar aquí.</p>
@@ -644,42 +640,66 @@
       <div class="modal-cabecera">
         <div>
           <h2 id="titulo-admin">Administración</h2>
-          <p>Control total de reseñas, tiendas, productos y promociones.</p>
+          <p>Control total de tiendas, productos y promociones.</p>
         </div>
       </div>
       <p class="admin-aviso modal-nota" id="admin-aviso" role="status"></p>
       <button type="button" class="boton boton--linea boton-chico admin-recargar" id="admin-recargar">Actualizar datos</button>
+      <nav class="admin-accesos" aria-label="Ir a la sección">
+        <a href="#admin-seccion-tiendas">Tiendas</a>
+        <a href="#admin-seccion-productos">Productos</a>
+        <a href="#admin-seccion-solicitudes">Solicitudes <span id="admin-solicitudes-pendientes">0</span></a>
+      </nav>
 
       <div class="admin-seccion">
-        <h3>1 · Reseñas pendientes</h3>
+        <h3>Historias pendientes</h3>
         <div id="admin-reseñas" class="admin-lista"></div>
       </div>
 
-      <div class="admin-seccion">
-        <h3>2 · Tiendas <small id="admin-tiendas-conteo"></small></h3>
-        <label class="admin-buscador">Buscar por nombre, categoría o responsable
-          <input type="search" data-admin-buscar="tienda" placeholder="Ej.: Quesos Rosita">
-        </label>
+      <div class="admin-seccion" id="admin-seccion-tiendas">
+        <div class="admin-seccion-cabecera">
+          <h3>Tiendas <small id="admin-tiendas-conteo"></small></h3>
+          <label class="admin-buscador">Buscar tienda
+            <input type="search" data-admin-buscar="tienda" placeholder="Nombre, categoría o responsable">
+          </label>
+          <label class="admin-filtro">Mostrar
+            <select data-admin-filtro-destacado="tienda">
+              <option value="todos">Todas</option>
+              <option value="destacados">Destacadas</option>
+              <option value="sin-destacar">Sin destacar</option>
+            </select>
+          </label>
+        </div>
         <div id="admin-tiendas" class="admin-lista"></div>
       </div>
 
-      <div class="admin-seccion">
-        <h3>3 · Productos <small id="admin-productos-conteo"></small></h3>
-        <label class="admin-buscador">Buscar por producto, categoría o tienda
-          <input type="search" data-admin-buscar="producto" placeholder="Ej.: queso fresco">
-        </label>
+      <div class="admin-seccion" id="admin-seccion-productos">
+        <div class="admin-seccion-cabecera">
+          <h3>Productos <small id="admin-productos-conteo"></small></h3>
+          <label class="admin-buscador">Buscar producto
+            <input type="search" data-admin-buscar="producto" placeholder="Nombre, categoría o tienda">
+          </label>
+          <label class="admin-filtro">Mostrar
+            <select data-admin-filtro-destacado="producto">
+              <option value="todos">Todos</option>
+              <option value="destacados">Destacados</option>
+              <option value="sin-destacar">Sin destacar</option>
+            </select>
+          </label>
+        </div>
         <div id="admin-productos" class="admin-lista"></div>
       </div>
 
       <div class="admin-seccion">
-        <h3>4 · Promociones para revisar</h3>
+        <h3>Promociones para revisar</h3>
         <p class="modal-nota">Las promociones empiezan su cuenta regresiva al aprobarse. Solo las aprobadas aparecen en la vitrina.</p>
         <div id="admin-promociones" class="admin-lista"></div>
       </div>
 
-      <div class="admin-seccion">
-        <h3>5 · Solicitudes de destacado</h3>
-        <p class="modal-nota">Confirma el pago recibido por WhatsApp antes de activar cada promoción.</p>
+      <div class="admin-seccion" id="admin-seccion-solicitudes">
+        <h3>Solicitudes de destacado <small id="admin-solicitudes-conteo"></small></h3>
+        <p class="modal-nota">Las solicitudes se comparten con administración. Confirma el pago recibido por WhatsApp antes de activar un destacado. Las rechazadas se pueden eliminar.</p>
+        <p class="admin-solicitudes-aviso" id="admin-solicitudes-aviso" role="status" hidden></p>
         <div id="admin-solicitudes" class="admin-lista"></div>
       </div>
     </div>

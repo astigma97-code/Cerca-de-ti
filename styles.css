@@ -418,15 +418,12 @@ img { max-width: 100%; display: block; }
 
 /* ---------- Productos ---------- */
 .productos { padding: 44px 0 56px; }
-.aviso-catalogo-demo {
+.promocion-aviso {
   display: flex; align-items: flex-start; gap: 12px;
   margin: 18px 0; padding: 15px 18px;
-  background: #fff6df; border: 1px solid #ead49a; border-radius: 14px;
-  color: #58441e; font-size: .92rem;
+  border-radius: 14px; font-size: .92rem;
 }
-.aviso-catalogo-demo[hidden] { display: none; }
-.aviso-catalogo-demo > span { flex: none; }
-.aviso-catalogo-demo p { margin: 0; }
+.promocion-aviso[hidden] { display: none; }
 .boton--promocion {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   padding: 12px 18px; border: 1px solid #8f3c28; border-radius: 12px;
@@ -465,7 +462,6 @@ img { max-width: 100%; display: block; }
   background: #f4e6cb; color: #805126; font-size: .64rem;
   font-weight: 900; letter-spacing: .1em;
 }
-.promocion-etiquetas .promocion-demo-badge { background: #fff0df; color: #9c4327; }
 .promocion-contenido h3 { margin: 0; color: #34291d; font-family: 'Fraunces', serif; font-size: clamp(1.45rem, 2.3vw, 2rem); line-height: 1.12; }
 .promocion-contenido > p { max-width: 58ch; color: #6e6254; font-size: .95rem; }
 .promocion-pie { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-top: 7px; }
@@ -473,8 +469,6 @@ img { max-width: 100%; display: block; }
 .promocion-contacto { display: inline-flex; align-items: center; gap: 8px; border-radius: 10px; padding: 11px 15px; font-weight: 800; text-decoration: none; }
 .promocion-contacto { min-height: 46px; box-shadow: 0 8px 18px rgba(37, 77, 58, .2); }
 .promocion-contacto:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(37, 77, 58, .28); }
-.promocion-contacto--demo { outline: 2px dashed rgba(255, 255, 255, .7); outline-offset: 2px; }
-.promocion-demo-nota { color: #8a7257; font-size: .78rem; font-weight: 800; }
 .promocion-contador {
   align-self: center; justify-self: stretch; margin: 20px; padding: 20px 14px;
   border: 1px solid rgba(154, 98, 38, .24); border-radius: 20px;
@@ -737,12 +731,6 @@ img { max-width: 100%; display: block; }
   font-size: .52rem; line-height: 1.1; font-weight: 900; letter-spacing: .14em;
 }
 .producto--oferta .producto-precio strong { color: #b43b32; }
-.vendedor-demo-etiqueta {
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--borde); border-radius: 999px;
-  padding: 7px 11px; color: var(--tinta-suave);
-  background: var(--crema-2); font-size: .75rem; font-weight: 800;
-}
 
 .sin-resultados { text-align: center; padding: 70px 20px; color: var(--tinta-suave); }
 .sin-resultados-titulo {
@@ -1408,27 +1396,61 @@ img { max-width: 100%; display: block; }
 }
 .admin-aviso--error { background: #fff0ef; color: #a03428; }
 .admin-recargar { align-self: flex-start; }
+.admin-accesos {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 9px 0; background: var(--blanco);
+}
+.admin-accesos a {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 12px; border: 1px solid var(--borde);
+  border-radius: 999px; background: var(--crema);
+  color: var(--verde); font-size: .8rem; font-weight: 800;
+  text-decoration: none;
+}
+.admin-accesos a:hover,
+.admin-accesos a:focus-visible { background: var(--menta); }
+.admin-accesos a span {
+  min-width: 20px; padding: 2px 6px; border-radius: 999px;
+  background: var(--ambar); color: #2b1a05; text-align: center;
+  font-size: .7rem;
+}
 .admin-seccion {
   background: var(--crema);
   border: 1px solid var(--borde);
   border-radius: 16px;
   padding: 16px;
+  scroll-margin-top: 74px;
 }
-.admin-seccion h3 {
-  margin: 0 0 12px;
-  padding-top: 0;
-  border-top: none;
+.admin-seccion-cabecera {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, .8fr) auto;
+  align-items: end; gap: 10px; margin-bottom: 14px;
 }
-.admin-seccion h3 small {
-  color: var(--tinta-suave); font-family: 'Karla', sans-serif;
-  font-size: .72rem; font-weight: 700;
+.admin-seccion-cabecera h3 { margin: 0; }
+.admin-seccion-cabecera h3 small {
+  display: block; margin-top: 4px; color: var(--tinta-suave);
+  font: 700 .72rem 'Karla', sans-serif;
 }
 .admin-buscador {
-  display: flex; flex-direction: column; gap: 6px;
-  margin-bottom: 12px; color: var(--tinta-suave);
-  font-size: .78rem; font-weight: 800;
+  display: flex; flex-direction: column; gap: 5px;
+  color: var(--tinta-suave); font-size: .76rem; font-weight: 800;
 }
 .admin-buscador input,
+.admin-filtro select {
+  min-width: 0; padding: 9px 11px;
+  border: 1px solid var(--borde); border-radius: 10px;
+  background: var(--blanco); color: var(--tinta); font: inherit;
+}
+.admin-filtro {
+  display: flex; flex-direction: column; gap: 5px;
+  color: var(--tinta-suave); font-size: .76rem; font-weight: 800;
+}
+.admin-filtro select { min-height: 38px; }
+.admin-seccion-cabecera input:focus,
+.admin-seccion-cabecera select:focus {
+  outline: none; border-color: var(--verde);
+  box-shadow: 0 0 0 3px rgba(46, 75, 60, .12);
+}
 .admin-editor-form input,
 .admin-editor-form select,
 .admin-editor-form textarea,
@@ -1437,7 +1459,6 @@ img { max-width: 100%; display: block; }
   border-radius: 10px; background: var(--blanco);
   color: var(--tinta); padding: 9px 11px; font: inherit;
 }
-.admin-buscador input:focus,
 .admin-editor-form input:focus,
 .admin-editor-form select:focus,
 .admin-editor-form textarea:focus,
@@ -1457,6 +1478,7 @@ img { max-width: 100%; display: block; }
 }
 .admin-item strong { font-size: .96rem; }
 .admin-item small { color: var(--tinta-suave); }
+.admin-item[hidden] { display: none; }
 .admin-actions {
   display: flex; flex-wrap: wrap; gap: 8px;
 }
@@ -1487,6 +1509,13 @@ img { max-width: 100%; display: block; }
   padding: 10px 12px; border: 1px solid var(--borde);
   border-radius: 12px; background: var(--crema);
 }
+.admin-destacado--activo { border-color: #b9d9bf; background: #f1f8f0; }
+.admin-destacado-estado {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--verde); font-size: .76rem; font-weight: 900;
+}
+.admin-destacado--activo .admin-destacado-estado { color: #21653c; }
+.admin-destacado--inactivo .admin-destacado-estado { color: var(--tinta-suave); }
 .admin-destacado label {
   display: flex; align-items: center; gap: 9px;
   color: var(--tinta); font-size: .78rem; font-weight: 800;
@@ -1495,6 +1524,23 @@ img { max-width: 100%; display: block; }
   width: 84px; padding: 7px 9px; font-size: .82rem;
 }
 .admin-destacado > small { flex: 1 1 150px; }
+.admin-solicitudes-aviso {
+  margin: 10px 0; padding: 10px 12px; border-radius: 10px;
+  background: #fff0ef; color: #a03428; font-size: .82rem;
+}
+.admin-solicitud { border-left: 4px solid var(--borde); }
+.admin-solicitud--pendiente { border-left-color: var(--ambar); }
+.admin-solicitud--aprobada { border-left-color: #62a878; }
+.admin-solicitud--rechazada { border-left-color: #c56a62; }
+.admin-solicitud-cabecera { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-solicitud-estado {
+  width: fit-content; padding: 4px 9px; border-radius: 999px;
+  background: var(--crema-2); color: var(--tinta-suave);
+  font-size: .7rem; font-weight: 900;
+}
+.admin-solicitud--pendiente .admin-solicitud-estado { background: #fff0cc; color: #75500c; }
+.admin-solicitud--aprobada .admin-solicitud-estado { background: #e6f4e8; color: #21653c; }
+.admin-solicitud--rechazada .admin-solicitud-estado { background: #fff0ef; color: #a03428; }
 .admin-editor {
   border-top: 1px solid var(--crema-2); padding-top: 8px;
 }
@@ -1539,10 +1585,6 @@ img { max-width: 100%; display: block; }
   font-size: 1.05rem; box-shadow: 0 8px 18px rgba(37, 77, 58, .18);
 }
 .detalle-wsp .icono { width: 22px; height: 22px; }
-.detalle-wsp--demo {
-  background: var(--crema-2); color: var(--tinta-suave);
-  box-shadow: none; cursor: not-allowed; pointer-events: none;
-}
 .detalle-vendedor {
   margin-top: 8px; width: 100%;
   display: flex; align-items: center; gap: 12px;
@@ -1762,6 +1804,8 @@ RESPONSIVE
   .admin-destacado { align-items: stretch; flex-direction: column; }
   .admin-destacado label { justify-content: space-between; }
   .admin-destacado > small { flex-basis: auto; }
+  .admin-seccion-cabecera { grid-template-columns: 1fr; align-items: stretch; }
+  .admin-filtro select { min-width: 0; width: 100%; }
   .admin-actions { align-items: stretch; }
   .admin-actions button { flex: 1 1 auto; }
   .form-reseña { padding: 18px; margin-top: 34px; }

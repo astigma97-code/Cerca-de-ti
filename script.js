@@ -252,13 +252,14 @@ function controlesDestacado(tipo, item) {
   const vencimiento = tieneVencimiento
     ? new Date(item.destacado_hasta)
     : vencimientoDestacado(dias);
-  return `<div class="admin-destacado">
-    <label for="dias-${identificador}-${id}">Duración del destacado (días)
-      <input id="dias-${identificador}-${id}" type="number" min="1" max="${DIAS_MAX_DESTACADO}" step="1" value="${dias}" data-dias-destacado="${identificador}" data-id="${id}">
+  return `<div class="admin-destacado ${activo ? 'admin-destacado--activo' : 'admin-destacado--inactivo'}">
+    <span class="admin-destacado-estado">${activo ? '★ Destacado activo' : 'Sin destacar'}</span>
+    <label for="dias-${identificador}-${id}">Duración (días)
+      <input id="dias-${identificador}-${id}" type="number" min="1" max="${DIAS_MAX_DESTACADO}" step="1" value="${dias}" aria-label="Duración del destacado en días" data-dias-destacado="${identificador}" data-id="${id}">
     </label>
     <small>${tieneVencimiento ? 'Vence:' : 'Finaliza al activar:'} <time datetime="${vencimiento.toISOString()}" data-vencimiento-destacado="${identificador}" data-id="${id}">${esc(vencimiento.toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'short' }))}</time></small>
     <div class="admin-actions">
-      <button type="button" class="boton-destacar" data-activar-destacado="${identificador}" data-id="${id}">${activo ? 'Renovar destacado' : 'Destacar'}</button>
+      <button type="button" class="boton-destacar" data-activar-destacado="${identificador}" data-id="${id}">${activo ? 'Renovar' : 'Destacar ahora'}</button>
       ${activo ? `<button type="button" class="boton-peligro" data-quitar-destacado="${identificador}" data-id="${id}">Quitar destacado</button>` : ''}
     </div>
   </div>`;
@@ -648,8 +649,10 @@ const makeLocalDb = () => {
         ? Object.values(snapshot.vendedores)
         : table === 'reseñas'
           ? snapshot.reseñas
-            : table === 'promociones'
-              ? snapshot.promociones
+          : table === 'promociones'
+            ? snapshot.promociones
+            : table === 'solicitudes_destacado'
+              ? snapshot.solicitudesDestacado
             : [];
 
     const api = {
@@ -715,6 +718,7 @@ const makeLocalDb = () => {
             if (table === 'productos') snapshot.productos = filtered;
             if (table === 'vendedores') snapshot.vendedores = Object.fromEntries(filtered.map(row => [row.id, row]));
             if (table === 'promociones') snapshot.promociones = filtered;
+            if (table === 'solicitudes_destacado') snapshot.solicitudesDestacado = filtered;
             save(snapshot);
             resolve({ error: null, data: filtered });
           }
@@ -741,6 +745,12 @@ const makeLocalDb = () => {
           snapshot.promociones.unshift(promocion);
           save(snapshot);
           return { error: null, data: promocion };
+        }
+        if (table === 'solicitudes_destacado') {
+          const solicitud = { id: `sd-${Date.now()}`, ...record, creado_en: new Date().toISOString() };
+          snapshot.solicitudesDestacado.unshift(solicitud);
+          save(snapshot);
+          return { error: null, data: solicitud };
         }
         return { error: null, data: record };
       },
@@ -861,7 +871,8 @@ let vieneDeConfirmacion = retornoConfirmacion.get('type') === 'signup';
 
 /* ---------- Estado ---------- */
 let productos = [], vendedores = {}, promociones = [], usuario = null, miPerfil = null;
-let catalogoDemoActivo = false;
+let solicitudesDestacado = [];
+let errorCargaSolicitudes = null;
 let fotosNuevas = [];
 let carruselFotos = [], carruselIndex = 0, detalleEmoji = '🛒';
 let revisandoExpiraciones = false;
@@ -923,11 +934,11 @@ async function cargarDatos() {
     ]);
     ultimoErrorCargaDatos = null;
     const local = readLocalState();
-    const productosRemotos = productosCargados.filter(producto => !usaSupabase || !esDatoDemo(producto));
-    const vendedoresRemotos = vendedoresCargados.filter(vendedor => !usaSupabase || !esDatoDemo(vendedor));
+    const productosRemotos = productosCargados;
+    const vendedoresRemotos = vendedoresCargados;
     const productosDemo = local.productos.filter(esDatoDemo);
     const vendedoresDemo = Object.values(local.vendedores).filter(esDatoDemo);
-    catalogoDemoActivo = modoDemo || productosDemo.length > 0;
+    const incluirDatosDemo = modoDemo || !usaSupabase || productosDemo.length > 0;
     const productosReales = productosRemotos.map(producto => {
       const localProducto = local.productos.find(item => item.id === producto.id);
       return {
@@ -935,9 +946,9 @@ async function cargarDatos() {
         ...(localProducto && !Array.isArray(producto.tags) ? { tags: localProducto.tags } : {})
       };
     });
-    productos = [...productosDemo, ...productosReales];
+    productos = [...(incluirDatosDemo ? productosDemo : []), ...productosReales];
     vendedores = {
-      ...Object.fromEntries(vendedoresDemo.map(vendedor => [vendedor.id, vendedor])),
+      ...(incluirDatosDemo ? Object.fromEntries(vendedoresDemo.map(vendedor => [vendedor.id, vendedor])) : {}),
       ...Object.fromEntries(vendedoresRemotos.map(vendedor => [vendedor.id, vendedor]))
     };
     await cargarPromociones();
@@ -948,7 +959,6 @@ async function cargarDatos() {
     erroresExpiracionDestacados.forEach((_, id) => {
       if (!idsDestacadosVencidos.has(id)) erroresExpiracionDestacados.delete(id);
     });
-    $('#aviso-catalogo-demo').hidden = !productos.some(esDatoDemo);
     await limpiarDestacadosVencidos();
     pintarVitrina();
     pintarVendedores();
@@ -962,7 +972,6 @@ async function cargarDatos() {
     vendedores = local.vendedores || {};
     promociones = local.promociones || [];
     pintarPromociones();
-    $('#aviso-catalogo-demo').hidden = !productos.some(esDatoDemo);
     pintarVitrina();
     pintarVendedores();
     pintarMetricas();
@@ -986,20 +995,19 @@ async function cargarPromociones() {
         state.promociones = state.promociones.filter(promocion => !vencidas.has(promocion.id));
         writeLocalState(state);
       }
+
       promociones = state.promociones;
     } else {
       const { data, error } = await db.from('promociones').select('*').order('creado_en', { ascending: false });
       if (error) throw error;
-      promociones = data?.length || !catalogoDemoActivo
-        ? (data || [])
+      promociones = data?.length
+        ? data
         : readLocalState().promociones.filter(esDatoDemo);
     }
     aviso.hidden = true;
     aviso.textContent = '';
   } catch (error) {
-    promociones = modoDemo || !usaSupabase || catalogoDemoActivo
-      ? readLocalState().promociones
-      : [];
+    promociones = readLocalState().promociones;
     aviso.hidden = false;
     aviso.textContent = 'No se pudieron cargar las promociones compartidas. Verifica que la tabla promociones esté creada en Supabase y vuelve a intentarlo.';
     aviso.classList.add('promocion-aviso--error');
@@ -1007,6 +1015,44 @@ async function cargarPromociones() {
   }
   indicePromocion = promocionesVisibles().length ? indicePromocion % promocionesVisibles().length : 0;
   pintarPromociones();
+}
+
+async function cargarSolicitudesDestacado() {
+  if (usaSupabase) {
+    const remotas = await leerTablaCompleta('solicitudes_destacado', [['creado_en', false], ['id', true]]);
+    const idsRemotos = new Set(remotas.map(solicitud => solicitud.id));
+    const locales = (readLocalState().solicitudesDestacado || [])
+      .filter(solicitud => !idsRemotos.has(solicitud.id))
+      .map(solicitud => ({ ...solicitud, _local: true }));
+    solicitudesDestacado = [...remotas, ...locales];
+  } else {
+    solicitudesDestacado = readLocalState().solicitudesDestacado || [];
+  }
+  errorCargaSolicitudes = null;
+}
+
+async function actualizarSolicitudDestacado(id, cambios) {
+  if (!usaSupabase || id.startsWith('sd-')) {
+    const state = readLocalState();
+    const solicitud = (state.solicitudesDestacado || []).find(item => item.id === id);
+    if (!solicitud) throw new Error('La solicitud ya no está disponible. Actualiza el panel.');
+    Object.assign(solicitud, cambios);
+    writeLocalState(state);
+    return;
+  }
+  const { error } = await db.from('solicitudes_destacado').update(cambios).eq('id', id);
+  if (error) throw error;
+  const { data, error: errorLectura } = await db.from('solicitudes_destacado').select('*').eq('id', id).maybeSingle();
+  if (errorLectura) throw errorLectura;
+  const cambiosVerificados = data && Object.entries(cambios).every(([campo, valor]) => {
+    if (campo === 'aprobada_en' && valor && data[campo]) {
+      return new Date(data[campo]).getTime() === new Date(valor).getTime();
+    }
+    return data[campo] === valor;
+  });
+  if (!cambiosVerificados) {
+    throw new Error('No se guardó el cambio de estado. Verifica los permisos de administración y la conexión.');
+  }
 }
 
 function promocionesVisibles() {
@@ -1027,18 +1073,15 @@ function pintarPromociones() {
   const vendedor = vendedores[promocion.vendedor_id] || {};
   const foto = urlImagen(promocion.imagen_url);
   const whatsapp = soloDigitos(vendedor.whatsapp);
-  const demo = esDatoDemo(promocion);
   const mensaje = encodeURIComponent(`Hola, vi tu promoción "${promocion.titulo}" en Cerca de ti. ¿Me das más información?`);
   const contacto = whatsapp
-    ? (demo
-      ? '<span class="boton boton--verde promocion-contacto promocion-contacto--demo" aria-disabled="true" title="Este contacto pertenece a un ejemplo">WhatsApp de ejemplo · sin contacto</span>'
-      : `<a class="boton boton--verde promocion-contacto" href="https://wa.me/${whatsapp}?text=${mensaje}" target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>`)
-    : `<span class="promocion-demo-nota">Contacta con la tienda para conocer disponibilidad</span>`;
+    ? `<a class="boton boton--verde promocion-contacto" href="https://wa.me/${whatsapp}?text=${mensaje}" target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>`
+    : '';
   contenedor.innerHTML = `
-    <article class="promocion-card${demo ? ' promocion-card--demo' : ''}">
+    <article class="promocion-card">
       <div class="promocion-foto">${foto ? `<img src="${esc(foto)}" alt="${esc(promocion.titulo)}" loading="lazy">` : '<span aria-hidden="true">🌟</span>'}</div>
       <div class="promocion-contenido">
-        <div class="promocion-etiquetas"><span>OFERTA DE TEMPORADA</span>${demo ? '<span class="promocion-demo-badge">EJEMPLO</span>' : ''}</div>
+        <div class="promocion-etiquetas"><span>OFERTA DE TEMPORADA</span></div>
         <h3>${esc(promocion.titulo)}</h3>
         <p>${esc(promocion.descripcion)}</p>
         <div class="promocion-pie">
@@ -1296,7 +1339,6 @@ function pintarVendedores() {
     const av = urlImagen(v.avatar_url) ? `<img src="${esc(urlImagen(v.avatar_url))}" alt="">` : esc(v.avatar_emoji || iniciales(v.negocio));
     const num = soloDigitos(v.whatsapp);
     const destacado = destacadoVigente(v);
-    const esDemo = esDatoDemo(v);
     return `<article class="vendedor${destacado ? ' vendedor--destacado' : ''}" data-categoria="${categoriaFiltro(v.categoria)}">
       ${destacado ? '<span class="vendedor-sello-destacado"><span aria-hidden="true">★</span> Tienda destacada</span>' : ''}
       <span class="vendedor-avatar" aria-hidden="true">${av}</span>
@@ -1308,13 +1350,11 @@ function pintarVendedores() {
       </div>
       <div class="vendedor-acciones">
         <button type="button" class="boton boton--linea" data-tienda="${v.id}">Ver tienda</button>
-        ${esDemo
-          ? '<span class="vendedor-demo-etiqueta">Ejemplo</span>'
-          : `<button type="button" class="boton boton--linea" data-compartir-tienda="${esc(v.id)}" aria-label="Compartir enlace de ${esc(v.negocio)}">Compartir</button>
-            <button type="button" class="boton boton--linea" data-qr-tienda="${esc(v.id)}" aria-label="Ver código QR de ${esc(v.negocio)}">Ver QR</button>
-            <a class="boton-wsp vendedor-accion-wsp" target="_blank" rel="noopener" aria-label="Escribir por WhatsApp a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}">
-              <svg class="icono" aria-hidden="true"><use href="#i-whatsapp"/></svg><span>WhatsApp</span>
-            </a>`}
+        <button type="button" class="boton boton--linea" data-compartir-tienda="${esc(v.id)}" aria-label="Compartir enlace de ${esc(v.negocio)}">Compartir</button>
+        <button type="button" class="boton boton--linea" data-qr-tienda="${esc(v.id)}" aria-label="Ver código QR de ${esc(v.negocio)}">Ver QR</button>
+        <a class="boton-wsp vendedor-accion-wsp" target="_blank" rel="noopener" aria-label="Escribir por WhatsApp a ${esc(v.negocio)}" href="https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio}, vi tu tienda en Cerca de ti.`)}">
+          <svg class="icono" aria-hidden="true"><use href="#i-whatsapp"/></svg><span>WhatsApp</span>
+        </a>
       </div>
     </article>`;
   }).join('') || '<p class="producto-detalle">Aún no hay tiendas registradas. ¡Sé la primera! 🌿</p>';
@@ -1330,7 +1370,6 @@ function pintarMetricas() {
 /* ---------- Interacción con tarjetas ---------- */
 function abrirWhatsAppProducto(id) {
   const p = productos.find(x => x.id === id); if (!p) return;
-  if (esDatoDemo(p)) return;
   registrarInteraccionProducto(id, 'whatsapp');
   pintarVitrina();
   const v = vendedores[p.vendedor_id] || {};
@@ -1424,19 +1463,8 @@ function abrirDetalle(id) {
   const tags = etiquetasProducto(p).length ? ` · ${etiquetasProducto(p).join(', ')}` : '';
   $('#detalle-detalle').textContent = `${p.detalle || 'Escríbele al vendedor por WhatsApp para más detalles.'}${tags}`;
   const contactoWhatsApp = $('#detalle-wsp');
-  const esDemo = esDatoDemo(p);
-  contactoWhatsApp.hidden = false;
-  contactoWhatsApp.toggleAttribute('aria-disabled', esDemo);
-  contactoWhatsApp.classList.toggle('detalle-wsp--demo', esDemo);
-  contactoWhatsApp.innerHTML = esDemo
-    ? 'WhatsApp no disponible en ejemplo'
-    : '<svg class="icono"><use href="#i-whatsapp"/></svg> Contactar por WhatsApp';
-  contactoWhatsApp.onclick = esDemo ? e => e.preventDefault() : null;
-  contactoWhatsApp.tabIndex = esDemo ? -1 : 0;
   const num = soloDigitos(v.whatsapp);
-  contactoWhatsApp.href = esDemo
-    ? '#'
-    : `https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en Cerca de ti y quiero hacer un pedido.`)}`;
+  contactoWhatsApp.href = `https://wa.me/${num}?text=${encodeURIComponent(`Hola ${v.negocio || ''}, vi "${p.nombre}" en Cerca de ti y quiero hacer un pedido.`)}`;
   contactoWhatsApp.dataset.contactarProducto = p.id;
   $('#detalle-vendedor-avatar').innerHTML = urlImagen(v.avatar_url) ? `<img src="${esc(urlImagen(v.avatar_url))}" alt="">` : esc(v.avatar_emoji || '🏪');
   $('#detalle-vendedor-nombre').textContent = v.negocio || 'Vendedor local';
@@ -1515,10 +1543,6 @@ function abrirTienda(id) {
   $('#tienda-direccion').textContent = v.direccion ? `📍 ${v.direccion}` : '📍 San Marcos, Cajamarca';
   $('#tienda-descripcion').textContent = v.descripcion || 'Este vendedor aún no agregó una descripción.';
   $('#tienda-categoria').textContent = v.categoria || 'Varios';
-  $('#tienda-wsp').hidden = esDatoDemo(v);
-  const tieneEnlacePublico = !esDatoDemo(v);
-  $('#btn-compartir-tienda-publica').hidden = !tieneEnlacePublico;
-  $('#btn-ver-qr-publico').hidden = !tieneEnlacePublico;
   $('#tienda-qr-panel').hidden = true;
   $('#btn-ver-qr-publico').setAttribute('aria-expanded', 'false');
   const deTienda = productos.filter(p => p.vendedor_id === id).sort((a, b) => Number(destacadoVigente(b)) - Number(destacadoVigente(a)) || new Date(b.creado_en || 0) - new Date(a.creado_en || 0));
@@ -2246,20 +2270,9 @@ function abrirPublicador() {
   });
 }
 
-function filtrarRegistrosAdmin(tipo, valor) {
-  const contenedor = tipo === 'tienda' ? $('#admin-tiendas') : $('#admin-productos');
-  const consulta = normalizar(valor.trim());
-  contenedor.querySelectorAll('.admin-item[data-admin-texto]').forEach(item => {
-    item.hidden = Boolean(consulta && !item.dataset.adminTexto.includes(consulta));
-  });
-}
-
 function actualizarAvisoAdmin() {
   const aviso = $('#admin-aviso');
-  const soloDemo = productos.length > 0 &&
-    productos.every(esDatoDemo) &&
-    Object.values(vendedores).every(esDatoDemo);
-  let mensaje = !usaSupabase || soloDemo
+  let mensaje = !usaSupabase
     ? 'Modo de demostración o local: los cambios se guardan solo en este navegador y no modifican datos compartidos.'
     : 'Los cambios se guardan en la base de datos y se reflejan en la vitrina pública.';
   const pendientes = erroresExpiracionDestacados.size;
@@ -2275,6 +2288,23 @@ function actualizarAvisoAdmin() {
   aviso.setAttribute('role', hayError ? 'alert' : 'status');
 }
 
+function filtrarRegistrosAdmin(tipo, valor) {
+  const contenedor = tipo === 'tienda' ? $('#admin-tiendas') : $('#admin-productos');
+  const consulta = normalizar(valor.trim());
+  const filtro = $(`[data-admin-filtro-destacado="${tipo}"]`).value;
+  const elementos = [...contenedor.querySelectorAll('.admin-item[data-admin-texto]')];
+  elementos.forEach(item => {
+    const coincideBusqueda = !consulta || item.dataset.adminTexto.includes(consulta);
+    const coincideDestacado = filtro === 'todos'
+      || (filtro === 'destacados' && item.dataset.destacado === 'true')
+      || (filtro === 'sin-destacar' && item.dataset.destacado !== 'true');
+    item.hidden = !(coincideBusqueda && coincideDestacado);
+  });
+  const visibles = elementos.filter(item => !item.hidden).length;
+  $(`#admin-${tipo === 'tienda' ? 'tiendas' : 'productos'}-conteo`).textContent =
+    `${visibles} de ${elementos.length}`;
+}
+
 function renderAdminPanel() {
   const adminResenas = $('#admin-reseñas');
   const adminTiendas = $('#admin-tiendas');
@@ -2282,11 +2312,22 @@ function renderAdminPanel() {
   const adminPromociones = $('#admin-promociones');
   const adminSolicitudes = $('#admin-solicitudes');
   const state = readLocalState();
-  const tiendasActuales = Object.values(vendedores);
-  const productosActuales = productos;
+  const filtrosActuales = Object.fromEntries(['tienda', 'producto'].map(tipo => [
+    tipo,
+    {
+      busqueda: $(`[data-admin-buscar="${tipo}"]`).value,
+      destacado: $(`[data-admin-filtro-destacado="${tipo}"]`).value
+    }
+  ]));
+  const tiendasActuales = Object.values(vendedores).sort((a, b) =>
+    Number(destacadoVigente(b)) - Number(destacadoVigente(a))
+    || (a.negocio || '').localeCompare(b.negocio || '', 'es')
+  );
+  const productosActuales = [...productos].sort((a, b) =>
+    Number(destacadoVigente(b)) - Number(destacadoVigente(a))
+    || (a.nombre || '').localeCompare(b.nombre || '', 'es')
+  );
   actualizarAvisoAdmin();
-  $('#admin-tiendas-conteo').textContent = `${tiendasActuales.length} tiendas`;
-  $('#admin-productos-conteo').textContent = `${productosActuales.length} productos`;
 
   const reseñas = state.reseñas || [];
   adminResenas.innerHTML = reseñas.length
@@ -2304,7 +2345,7 @@ function renderAdminPanel() {
     : '<p class="producto-detalle">No hay reseñas para revisar.</p>';
 
   adminTiendas.innerHTML = tiendasActuales.map(v => `
-    <div class="admin-item" data-admin-texto="${esc(normalizar(`${v.negocio || ''} ${v.responsable || ''} ${v.categoria || ''} ${v.whatsapp || ''}`))}">
+    <div class="admin-item" data-destacado="${destacadoVigente(v)}" data-admin-texto="${esc(normalizar(`${v.negocio || ''} ${v.responsable || ''} ${v.categoria || ''} ${v.whatsapp || ''}`))}">
       <strong>${esc(v.negocio || 'Tienda sin nombre')}</strong>
       <small>${esc(v.responsable || 'Sin responsable')} · ${esc(v.categoria || 'General')}</small>
       ${controlesDestacado('tienda', v)}
@@ -2329,7 +2370,7 @@ function renderAdminPanel() {
   `).join('') || '<p class="producto-detalle">No hay tiendas registradas.</p>';
 
   adminProductos.innerHTML = productosActuales.map(p => `
-    <div class="admin-item" data-admin-texto="${esc(normalizar(`${p.nombre || ''} ${p.categoria || ''} ${vendedores[p.vendedor_id]?.negocio || ''} ${p.detalle || ''}`))}">
+    <div class="admin-item" data-destacado="${destacadoVigente(p)}" data-admin-texto="${esc(normalizar(`${p.nombre || ''} ${p.categoria || ''} ${vendedores[p.vendedor_id]?.negocio || ''} ${p.detalle || ''}`))}">
       <strong>${esc(p.nombre)}</strong>
       <small>${esc(p.categoria || 'General')} · S/ ${fmtPrecio(p.precio)} · ${esc(vendedores[p.vendedor_id]?.negocio || 'Tienda no encontrada')}</small>
       ${controlesDestacado('producto', p)}
@@ -2370,28 +2411,62 @@ function renderAdminPanel() {
     }).join('')
     : '<p class="producto-detalle">No hay promociones pendientes ni publicadas.</p>';
 
-  $$('[data-admin-buscar]').forEach(input => filtrarRegistrosAdmin(input.dataset.adminBuscar, input.value));
-
-  const solicitudes = state.solicitudesDestacado || [];
-  adminSolicitudes.innerHTML = solicitudes.length
-    ? solicitudes.map(s => {
-        const producto = state.productos.find(p => p.id === s.producto_id);
-        const vendedor = state.vendedores[s.vendedor_id] || {};
-        return `<div class="admin-item">
-          <strong>${esc(producto?.nombre || 'Producto eliminado')}</strong>
-          <small>${esc(vendedor.negocio || 'Vendedor')} · ${s.dias} días · S/ ${fmtPrecio(s.precio)} · ${esc(s.estado)}</small>
-          <small>Solicitado: ${fechaCorta(s.creado_en)}</small>
+  const solicitudesOrdenadas = [...solicitudesDestacado].sort((a, b) =>
+    (a.estado === 'pendiente' ? 0 : 1) - (b.estado === 'pendiente' ? 0 : 1)
+    || new Date(b.creado_en || 0) - new Date(a.creado_en || 0)
+  );
+  const solicitudesPendientes = solicitudesDestacado.filter(solicitud => solicitud.estado === 'pendiente').length;
+  $('#admin-solicitudes-pendientes').textContent = String(solicitudesPendientes);
+  $('#admin-solicitudes-conteo').textContent =
+    `${solicitudesPendientes} pendiente(s) · ${solicitudesDestacado.length} total`;
+  const avisoSolicitudes = $('#admin-solicitudes-aviso');
+  avisoSolicitudes.hidden = !errorCargaSolicitudes;
+  avisoSolicitudes.textContent = errorCargaSolicitudes
+    ? `No se pudieron cargar las solicitudes: ${errorCargaSolicitudes}. En Supabase, ejecuta la actualización de solicitudes_destacado incluida en supabase.sql y vuelve a actualizar los datos.`
+    : '';
+  adminSolicitudes.innerHTML = !errorCargaSolicitudes && solicitudesOrdenadas.length
+    ? solicitudesOrdenadas.map(s => {
+        const producto = productos.find(item => item.id === s.producto_id)
+          || state.productos.find(item => item.id === s.producto_id);
+        const vendedor = vendedores[s.vendedor_id] || state.vendedores[s.vendedor_id] || {};
+        const estadoSolicitud = s.estado === 'pendiente'
+          ? 'Pendiente de pago'
+          : s.estado === 'aprobada' ? 'Aprobada' : 'Rechazada';
+        const whatsapp = soloDigitos(vendedor.whatsapp);
+        const contacto = whatsapp
+          ? `<a class="boton-ok" href="https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hola ${vendedor.negocio || ''}, revisamos tu solicitud de destacado para ${producto?.nombre || 'tu producto'}.`)}" target="_blank" rel="noopener">Contactar al vendedor</a>`
+          : '';
+        return `<div class="admin-item admin-solicitud admin-solicitud--${esc(s.estado)}">
+          <div class="admin-solicitud-cabecera">
+            <strong>${esc(producto?.nombre || 'Producto eliminado')}</strong>
+            <span class="admin-solicitud-estado">${estadoSolicitud}</span>
+          </div>
+          <small>${esc(vendedor.negocio || 'Tienda no encontrada')} · ${Number(s.dias)} días · S/ ${fmtPrecio(s.precio)}</small>
+          <small>Solicitado: ${s.creado_en ? esc(fechaCorta(s.creado_en)) : 'Fecha no disponible'}</small>
           <div class="admin-actions">
-            <a class="boton-ok" href="https://wa.me/${ADMIN_WHATSAPP}?text=${encodeURIComponent(`Hola, confirmo el pago del destacado de ${producto?.nombre || 'producto'} por ${s.dias} días.`)}" target="_blank" rel="noopener">Hablar por WhatsApp</a>
-            ${s.estado === 'pendiente' ? `<button type="button" class="boton-ok" data-solicitud-aprobar="${s.id}">Confirmar pago y activar</button><button type="button" class="boton-peligro" data-solicitud-rechazar="${s.id}">Rechazar</button>` : ''}
+            ${contacto}
+            ${s.estado === 'pendiente' ? `<button type="button" class="boton-ok" data-solicitud-aprobar="${esc(s.id)}">Confirmar pago y destacar</button><button type="button" class="boton-peligro" data-solicitud-rechazar="${esc(s.id)}">Rechazar</button>` : ''}
+            ${s.estado === 'rechazada' ? `<button type="button" class="boton-peligro" data-solicitud-eliminar="${esc(s.id)}">Eliminar solicitud rechazada</button>` : ''}
           </div>
         </div>`;
       }).join('')
-    : '<p class="producto-detalle">No hay solicitudes de destacado.</p>';
+    : errorCargaSolicitudes
+      ? ''
+      : '<p class="producto-detalle">No hay solicitudes de destacado.</p>';
+
+  $$('[data-admin-buscar]').forEach(input => {
+    const filtro = filtrosActuales[input.dataset.adminBuscar];
+    input.value = filtro.busqueda;
+    $(`[data-admin-filtro-destacado="${input.dataset.adminBuscar}"]`).value = filtro.destacado;
+    filtrarRegistrosAdmin(input.dataset.adminBuscar, input.value);
+  });
 }
 
 $$('[data-admin-buscar]').forEach(input => input.addEventListener('input', () => {
   filtrarRegistrosAdmin(input.dataset.adminBuscar, input.value);
+}));
+$$('[data-admin-filtro-destacado]').forEach(select => select.addEventListener('change', () => {
+  filtrarRegistrosAdmin(select.dataset.adminFiltroDestacado, $(`[data-admin-buscar="${select.dataset.adminFiltroDestacado}"]`).value);
 }));
 
 $('#admin-recargar').addEventListener('click', async e => {
@@ -2399,7 +2474,15 @@ $('#admin-recargar').addEventListener('click', async e => {
   boton.disabled = true;
   try {
     await cargarDatos();
+    try {
+      await cargarSolicitudesDestacado();
+    } catch (error) {
+      errorCargaSolicitudes = error.message;
+      console.error('No se pudieron actualizar las solicitudes de destacado:', error);
+    }
     renderAdminPanel();
+  } catch (error) {
+    alert(`No se pudieron actualizar los datos de administración: ${error.message}`);
   } finally {
     boton.disabled = false;
   }
@@ -2412,32 +2495,65 @@ async function abrirAdmin() {
     return;
   }
   await cargarDatos();
+  try {
+    await cargarSolicitudesDestacado();
+  } catch (error) {
+    errorCargaSolicitudes = error.message;
+    console.error('No se pudieron cargar las solicitudes de destacado:', error);
+  }
   renderAdminPanel();
   modalAdmin.showModal();
 }
 
-function solicitarDestacado(productoId, vendedorId, dias) {
+async function solicitarDestacado(productoId, vendedorId, dias) {
   const plan = PLANES_DESTACADO[dias];
   if (!plan) return;
   const state = readLocalState();
-  const producto = state.productos.find(p => p.id === productoId);
+  const producto = productos.find(p => p.id === productoId)
+    || state.productos.find(p => p.id === productoId);
   if (!producto) return;
   const existente = (state.solicitudesDestacado || []).find(s => s.producto_id === productoId && s.estado === 'pendiente');
   if (existente) return alert('Este producto ya tiene una solicitud pendiente de confirmación.');
-  state.solicitudesDestacado = [{
-    id: `sd-${Date.now()}`,
+  const solicitud = {
     producto_id: productoId,
     vendedor_id: vendedorId,
     dias: plan.dias,
     precio: plan.precio,
-    estado: 'pendiente',
-    creado_en: new Date().toISOString()
-  }, ...(state.solicitudesDestacado || [])];
-  writeLocalState(state);
+    estado: 'pendiente'
+  };
+  const ventanaWhatsApp = window.open('', '_blank');
   const mensaje = `Hola, quiero destacar "${producto.nombre}" por ${plan.dias} días. El monto es S/ ${plan.precio}. Adjunto mi comprobante de pago.`;
-  window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener');
-  pintarMisProductos();
-  alert('Solicitud registrada. Envía tu comprobante por WhatsApp; administración activará el destacado al confirmar el pago.');
+  try {
+    if (usaSupabase) {
+      const { error } = await db.from('solicitudes_destacado').insert(solicitud);
+      if (error) {
+        if (error.code === '23505') throw new Error('Ya tienes una solicitud pendiente para este producto.');
+        if (error.code === 'PGRST205' || /solicitudes_destacado/i.test(error.message || '')) {
+          throw new Error('Falta configurar las solicitudes en Supabase. Ejecuta la actualización de solicitudes_destacado incluida en supabase.sql.');
+        }
+        throw error;
+      }
+    } else {
+      state.solicitudesDestacado = [{
+        id: `sd-${Date.now()}`,
+        ...solicitud,
+        creado_en: new Date().toISOString()
+      }, ...(state.solicitudesDestacado || [])];
+      writeLocalState(state);
+    }
+    const urlWhatsApp = `https://wa.me/${ADMIN_WHATSAPP}?text=${encodeURIComponent(mensaje)}`;
+    if (ventanaWhatsApp) {
+      ventanaWhatsApp.opener = null;
+      ventanaWhatsApp.location.href = urlWhatsApp;
+    }
+    pintarMisProductos();
+    alert(ventanaWhatsApp
+      ? 'Solicitud registrada. Envía tu comprobante por WhatsApp; administración activará el destacado al confirmar el pago.'
+      : 'Solicitud registrada, pero el navegador bloqueó la ventana de WhatsApp. Escríbenos al 940 771 593 y envía tu comprobante.');
+  } catch (error) {
+    ventanaWhatsApp?.close();
+    alert(`No se pudo registrar la solicitud de destacado: ${error.message}`);
+  }
 }
 
 $('#admin-reseñas').addEventListener('click', e => {
@@ -2717,27 +2833,48 @@ $('#admin-productos').addEventListener('click', async e => {
 $('#admin-solicitudes').addEventListener('click', async e => {
   const aprobar = e.target.closest('[data-solicitud-aprobar]');
   const rechazar = e.target.closest('[data-solicitud-rechazar]');
-  const id = aprobar?.dataset.solicitudAprobar || rechazar?.dataset.solicitudRechazar;
+  const eliminar = e.target.closest('[data-solicitud-eliminar]');
+  const id = aprobar?.dataset.solicitudAprobar
+    || rechazar?.dataset.solicitudRechazar
+    || eliminar?.dataset.solicitudEliminar;
   if (!id) return;
-  const state = readLocalState();
-  const solicitud = (state.solicitudesDestacado || []).find(s => s.id === id);
+  const solicitud = solicitudesDestacado.find(item => item.id === id);
   if (!solicitud) return;
-  const producto = state.productos.find(p => p.id === solicitud.producto_id);
+  if (eliminar && solicitud.estado !== 'rechazada') return;
+  if (eliminar && !confirm('¿Eliminar esta solicitud rechazada? Esta acción no se puede deshacer.')) return;
+  const boton = aprobar || rechazar || eliminar;
+  boton.disabled = true;
   try {
-    if (aprobar) {
+    if (eliminar) {
+      if (usaSupabase && !solicitud._local) {
+        const { data, error } = await db.from('solicitudes_destacado')
+          .delete().eq('id', id).eq('estado', 'rechazada').select('id').maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error('No se eliminó la solicitud. Comprueba que esté rechazada y que tengas permisos de administración.');
+      } else {
+        const state = readLocalState();
+        state.solicitudesDestacado = (state.solicitudesDestacado || []).filter(item => item.id !== id);
+        writeLocalState(state);
+      }
+    } else if (aprobar) {
+      const producto = productos.find(item => item.id === solicitud.producto_id)
+        || readLocalState().productos.find(item => item.id === solicitud.producto_id);
       if (!producto) throw new Error('El producto solicitado ya no existe.');
-      producto.destacado = true;
-      producto.destacado_hasta = new Date(Date.now() + solicitud.dias * 86400000).toISOString();
-      await guardarDestacado('productos', producto.id, true, producto.destacado_hasta);
-      solicitud.estado = 'aprobada';
-      solicitud.aprobada_en = new Date().toISOString();
+      const destacadoHasta = new Date(Date.now() + Number(solicitud.dias) * MILISEGUNDOS_DIA).toISOString();
+      await guardarDestacado('productos', producto.id, true, destacadoHasta);
+      await actualizarSolicitudDestacado(id, {
+        estado: 'aprobada',
+        aprobada_en: new Date().toISOString()
+      });
+    } else if (rechazar) {
+      await actualizarSolicitudDestacado(id, { estado: 'rechazada', aprobada_en: null });
     }
-    if (rechazar) solicitud.estado = 'rechazada';
-    writeLocalState(state);
-    renderAdminPanel();
     await cargarDatos();
+    await cargarSolicitudesDestacado();
+    renderAdminPanel();
   } catch (error) {
     alert(`No se pudo procesar la solicitud: ${error.message}`);
+    boton.disabled = false;
   }
 });
 
